@@ -4,9 +4,9 @@
 #include <string.h>
 #include <stdbool.h>
 
-#include "unique_string.h"
+#include "unique_strings.h"
 
-#define UNIQUE_STRING_BUCKETS 128
+#define UNIQUE_STRING_BUCKETS 32
 #define MURMUR_SEED 0xf9a025a4 // random
 
 
@@ -15,11 +15,6 @@ struct buffer_t {
 	size_t capacity;
 	char *data;
 } buffer;
-
-
-struct buffer_ptr_t {
-	size_t addr;
-};
 
 
 struct string_hash_pair_t {
@@ -31,7 +26,7 @@ struct string_hash_pair_t {
 struct unique_string_node {
 	struct unique_string_node *next;
 	uint32_t hash;
-	struct buffer_ptr_t buffer_ptr;
+	struct unique_string_handle_t buffer_ptr;
 };
 
 struct unique_strings_t {
@@ -78,25 +73,28 @@ static uint32_t murmur2_hash(const char *data, int len, uint32_t seed) {
 //# Simple managed growable buffer
 ///###############################
 
-// Allocate a buffer_ptr_t associated with the requested size.
+// Allocate a unique_string_handle_t associated with the requested size.
 // Use buffer_addr() to get an actual pointer
-static struct buffer_ptr_t buffer_alloc(struct buffer_t* buffer, size_t size) {
-	if (buffer->used + size > buffer->capacity) {
-		buffer->capacity += 1024; // grow by 1kB
+static struct unique_string_handle_t buffer_alloc(struct buffer_t* buffer, size_t size) {
+	if (buffer->used + size >= buffer->capacity) {
+		buffer->capacity += 1024 * ((size / 1024) + 1); // grow by 1kB
 		buffer->data = realloc(buffer->data, buffer->capacity);
 	}
 
-	struct buffer_ptr_t ptr = { .addr = buffer->used };
+	struct unique_string_handle_t ptr = { .addr = buffer->used };
 	buffer->used += size;
 	return ptr;
 }
 
 
-// Returns actual memory address for a buffer_ptr_t
-static char* buffer_addr(struct buffer_t *buffer, struct buffer_ptr_t ptr) {
+// Returns actual memory address for a unique_string_handle_t
+static char* buffer_addr(struct buffer_t *buffer, struct unique_string_handle_t ptr) {
 	return buffer->data + ptr.addr;
 }
 
+const char* unique_strings_get(struct unique_strings_t *strings, struct unique_string_handle_t ptr) {
+	return strings->buffer.data + ptr.addr;
+}
 
 // Frees buffer's backing storage and resets usage data
 static void buffer_clear(struct buffer_t *buffer) {
@@ -120,7 +118,6 @@ static uint32_t _string_hash_pair_prepare(struct string_hash_pair_t* shp, const 
 struct unique_strings_t *unique_strings_create() {
 	struct unique_strings_t *us = malloc(sizeof(struct unique_strings_t));
 	memset((void*)us, 0, sizeof(struct unique_strings_t));
-
 	us->buckets = malloc(sizeof(struct unique_string_node *) * UNIQUE_STRING_BUCKETS);
 	memset(us->buckets, 0, sizeof(struct unique_string_node *) * UNIQUE_STRING_BUCKETS);
 	return us;
@@ -131,6 +128,7 @@ static uint32_t _get_bucket_index(const struct string_hash_pair_t *pair) {
 	return pair->hash % UNIQUE_STRING_BUCKETS;
 }
 
+
 // Returns true on successful find
 // `node` will point to node on success, otherwise
 // it will be set to point to the parent (used for insertion)
@@ -140,28 +138,28 @@ static bool _unique_strings_find_node(
 		struct string_hash_pair_t *pair)
 {
 	const uint32_t bucket_id = _get_bucket_index(pair);
-
 	const uint32_t pair_hash = pair->hash;
 	struct unique_string_node *iter = us->buckets[bucket_id];
+	*node = NULL;
 
 	while (iter) {
+		*node = iter;
+
 		if (iter->hash == pair_hash &&
 			strcmp(buffer_addr(&us->buffer, iter->buffer_ptr), pair->str) == 0)
 		{
-			// Found!
-			*node = iter;
+			// found matching hash and string
 			return true;
 		}
 
-		if (iter->hash > pair_hash) {
-			*node = iter; // parent
-			return false;
+		// Sorted search/insert
+		if (iter->hash < pair_hash) {
+			break;
 		}
 
 		iter = iter->next;
 	}
 
-	*node = NULL;
 	return false;
 }
 
@@ -183,33 +181,38 @@ static struct unique_string_node *unique_string_node_create(
 	return node;
 }
 
-void unique_strings_add(struct unique_strings_t *us, const char *str) {
+
+struct unique_string_handle_t unique_strings_add(struct unique_strings_t *us, const char *str) {
 	struct string_hash_pair_t pair;
 	_string_hash_pair_prepare(&pair, str);
+	struct unique_string_node *found = NULL;
 
-	struct unique_string_node *found_node = NULL;
-
-	// If the node isn't found, insert it
-	if (!_unique_strings_find_node(&found_node, us, &pair)) {
+	if (! _unique_strings_find_node(&found, us, &pair)) {
+		// Node was not found...
 		struct unique_string_node *new_node = unique_string_node_create(&pair, &us->buffer);
 
-		// If found_node is set, then it is the appropriate parent node
-		// for the new node. If it's null, then we just throw the new
-		// node into the appropriate bucket.
-		if (found_node) {
-			struct unique_string_node *next = found_node->next;
-			found_node->next = new_node;
-			new_node->next = next;
+		if (found) {
+			// If parent is set, then it is the appropriate parent node
+			// for the new node. If it's null, then we just throw the new
+			// node into the appropriate bucket.
+			new_node->next = found->next;
+			found->next = new_node;
 		} else {
+			// Insert a new root node into the bucket
 			us->buckets[_get_bucket_index(&pair)] = new_node;
 		}
+		return new_node->buffer_ptr;
 	}
+
+	return found->buffer_ptr;
 }
+
 
 static void _unique_string_free_nodes(struct unique_string_node *node) {
 	if (node->next) {
 		_unique_string_free_nodes(node->next);
 	}
+
 	free(node);
 }
 
@@ -219,13 +222,15 @@ static void _unique_string_free_nodes(struct unique_string_node *node) {
 // have valid pointers to all the strings. This unlinks the
 // monolithic string data buffer and resets all unique_strings_t
 // structures.
-const char* unique_string_extract_buffer(struct unique_strings_t *us) {
-}
+/*const char* unique_string_extract_buffer(struct unique_strings_t *us) {*/
+/*}*/
 
 void unique_strings_destroy(struct unique_strings_t *us) {
 	if (us->buckets) {
 		for (unsigned int i=0; i < UNIQUE_STRING_BUCKETS; i++) {
-			if (us->buckets[i]) _unique_string_free_nodes(us->buckets[i]);
+			if (us->buckets[i]) {
+				_unique_string_free_nodes(us->buckets[i]);
+			}
 		}
 		free(us->buckets);
 	}

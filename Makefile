@@ -1,7 +1,7 @@
 TARGET = user_agent
 LIBS = -lyaml -lpcre
 CC = clang
-SANITIZER_FLAGS = -fsanitize=address
+SANITIZER_FLAGS = -fsanitize=address -fno-omit-frame-pointer
 CFLAGS = $(SANITIZER_FLAGS) -std=c99 -g -Wall
 LDFLAGS = $(SANITIZER_FLAGS)
 OBJECTS = $(patsubst %.c, %.o, $(wildcard src/*.c))
