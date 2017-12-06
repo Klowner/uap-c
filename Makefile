@@ -1,8 +1,9 @@
 TARGET = user_agent
-LIBS = -lasan -lyaml -lpcre
+LIBS = -lyaml -lpcre
 CC = clang
-CFLAGS = -fsanitize=address -std=c99 -g -Wall
-
+SANITIZER_FLAGS = -fsanitize=address
+CFLAGS = $(SANITIZER_FLAGS) -std=c99 -g -Wall
+LDFLAGS = $(SANITIZER_FLAGS)
 OBJECTS = $(patsubst %.c, %.o, $(wildcard src/*.c))
 HEADERS = $(wildcard *.h)
 
@@ -12,7 +13,7 @@ HEADERS = $(wildcard *.h)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(TARGET): $(OBJECTS)
-	$(CC) $(OBJECTS) -Wall $(LIBS) -o $@
+	$(CC) $(OBJECTS) -Wall $(LDFLAGS) $(LIBS) -o $@
 
 clean:
 	rm -f $(TARGET)
