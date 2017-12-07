@@ -1,14 +1,13 @@
-#include <stdio.h>
+#include <stdbool.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdbool.h>
 
 #include "unique_strings.h"
 
 #define UNIQUE_STRING_BUCKETS 32
 #define MURMUR_SEED 0xf9a025a4 // random
-
 
 struct buffer_t {
 	size_t used;
@@ -92,13 +91,11 @@ static char* buffer_addr(struct buffer_t *buffer, struct unique_string_handle_t 
 	return buffer->data + ptr.addr;
 }
 
-/*const char* unique_strings_get(struct unique_strings_t *strings, struct unique_string_handle_t ptr) {*/
-	/*return strings->buffer.data + ptr.addr;*/
-/*}*/
 
 const char* unique_strings_get(struct unique_string_handle_t handle) {
 	return handle.parent->data + handle.addr;
 }
+
 
 // Frees buffer's backing storage and resets usage data
 static void buffer_clear(struct buffer_t *buffer) {
@@ -108,6 +105,11 @@ static void buffer_clear(struct buffer_t *buffer) {
 	buffer->data = NULL;
 }
 
+
+static void _buffer_compact(struct buffer_t *buffer) {
+	buffer->data = realloc(buffer->data, buffer->used);
+	buffer->capacity = buffer->used;
+}
 
 
 // Copies the string pointer to the string_hash_pair_t and generates
@@ -229,7 +231,8 @@ static void _unique_string_free_nodes(struct unique_string_node *node) {
 /*const char* unique_string_extract_buffer(struct unique_strings_t *us) {*/
 /*}*/
 
-void unique_strings_destroy(struct unique_strings_t *us) {
+
+static void _unique_string_free_buckets(struct unique_strings_t *us) {
 	if (us->buckets) {
 		for (unsigned int i=0; i < UNIQUE_STRING_BUCKETS; i++) {
 			if (us->buckets[i]) {
@@ -238,13 +241,29 @@ void unique_strings_destroy(struct unique_strings_t *us) {
 		}
 		free(us->buckets);
 	}
+	us->buckets = NULL;
+}
+
+
+// Frees the bucketed structures, reducing the footprint of the
+// unique strings object to only hold the deduped string data.
+void unique_strings_freeze(struct unique_strings_t *us) {
+	_unique_string_free_buckets(us);
+	_buffer_compact(us);
+}
+
+void unique_strings_destroy(struct unique_strings_t *us) {
+	_unique_string_free_buckets(us);
 	buffer_clear(&us->buffer);
 	free(us);
 }
-
 
 void unique_strings_dump(struct unique_strings_t *us, const char *filename) {
 	FILE *fd = fopen(filename, "wb");
 	fwrite((void*)us->buffer.data, 1, us->buffer.used, fd);
 	fclose(fd);
+}
+
+bool unique_strings_owns(struct unique_strings_t *us, const char* str) {
+	return str >= us->buffer.data && str < (us->buffer.data + us->buffer.used);
 }
