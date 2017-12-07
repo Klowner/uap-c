@@ -19,8 +19,10 @@ struct ua_replacement {
 		OS_V1,
 		OS_V2,
 		OS_V3,
+		OS_V4,
 		V1,
 		V2,
+		V3,
 	} type;
 
 	struct unique_string_handle_t value;
@@ -30,13 +32,42 @@ struct ua_replacement {
 
 struct ua_expression_pair {
 	pcre *regex;
+	pcre_extra *pcre_extra;
 	struct ua_replacement *replacements;
 	struct ua_expression_pair *next;
 };
 
 
+
+struct ua_parse_state {
+	const char *string;
+
+	struct ua_parse_state_user_agent {
+		const char *family;
+		const char *major;
+		const char *minor;
+		const char *patch;
+	} user_agent;
+
+	struct ua_parse_state_os {
+		const char *family;
+		const char *major;
+		const char *minor;
+		const char *patch;
+		const char *patchMinor;
+	} os;
+
+	struct ua_parse_state_device {
+		const char *family;
+		const char *brand;
+		const char *model;
+	} device;
+};
+
+
 struct ua_parser_group {
 	struct ua_expression_pair* expression_pairs;
+	void (*apply_replacements_cb)(struct ua_parse_state*, struct ua_expression_pair*, const char *matches[8], const size_t matches_size);
 };
 
 
@@ -45,6 +76,7 @@ struct user_agent_parser {
 	struct ua_parser_group os_parser_group;
 	struct ua_parser_group device_parser_group;
 };
+
 
 
 struct ua_expression_pair ** ua_expression_pair_last(struct ua_expression_pair *pair) {
@@ -73,18 +105,151 @@ static void ua_expression_pair_destroy(struct ua_expression_pair *pair) {
 
 		ua_replacement_destroy(pair->replacements);
 		pcre_free(pair->regex);
+		pcre_free(pair->pcre_extra);
 		free(pair);
 
 		pair = next;
 	}
 }
 
+static void ua_parser_group_exec(
+		const struct ua_parser_group *group,
+		struct ua_parse_state *state,
+		const char *ua_string)
+{
+	struct ua_expression_pair *pair = group->expression_pairs;
+	const size_t ua_string_length = strlen(ua_string);
+	const char *substring_matches[8] = { NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL};
+	/*const char *match = NULL;*/
+	int substrings[64];
+
+	while (pair) {
+		int pcre_result = pcre_exec(
+				pair->regex,
+				pair->pcre_extra,
+				ua_string,
+				ua_string_length,
+				0,
+				0,
+				substrings,
+				64);
+
+		if (pcre_result > 0) {
+			// a smallish buffer to hold the extracted strings
+			char buffer[1024];
+			char *buffer_iter = &buffer[0];
+			int buffer_avail = 1024;
+
+			for (int i=0; i < pcre_result-1; i++) {
+				int copy_size = pcre_copy_substring(ua_string, substrings, pcre_result, i + 1, buffer_iter, buffer_avail);
+				if (copy_size) {
+					substring_matches[i] = buffer_iter;
+					buffer_avail -= copy_size;
+					buffer_iter += copy_size;
+				}
+
+				printf("!!!!matched: %d %s\n", i, substring_matches[i]);
+			}
+
+			group->apply_replacements_cb(state, pair, &(substring_matches[0]), sizeof(buffer) - buffer_avail);
+		}
+
+		pair = pair->next;
+	}
+}
+
+static void format_repl(const char **dest, const char *replacement, const char *matches[8]) {
+
+	/*printf("we've got %s\n", replacement);*/
+	/**dest = replacement;*/
+}
+
+static void apply_replacements_user_agent(
+		struct ua_parse_state *state,
+		struct ua_expression_pair *pair,
+		const char *matches[8],
+		const size_t matches_size)
+{
+	struct ua_replacement *repl = pair->replacements;
+	struct ua_parse_state_user_agent *ua_state = &state->user_agent;
+
+	/*
+	while (repl) {
+		const char* replacement_string = unique_strings_get(repl->value);
+		const char** dest = NULL;
+
+		switch (repl->type) {
+			case FAMILY:  dest = &(ua_state->family); break;
+			case V1:      dest = &(ua_state->major); break;
+			case V2:      dest = &(ua_state->minor); break;
+			case V3:      dest = &(ua_state->patch); break;
+			default: break;
+		}
+
+		format_repl(dest, replacement_string, matches);
+
+		repl = repl->next;
+	}
+*/
+	/*printf("matches!: %s\n", matches[0]);*/
+	/*if (ua_state->family == NULL && matches[0]) {*/
+		/*ua_state->family = strdup(matches[0]);*/
+	/*}*/
+}
+
+static void apply_replacements_os(
+		struct ua_parse_state *state,
+		struct ua_expression_pair *pair,
+		const char *matches[8],
+		const size_t matches_size)
+{
+	struct ua_replacement *repl = pair->replacements;
+	struct ua_parse_state_os *os_state = &state->os;
+
+
+	while (repl) {
+		const char* value = unique_strings_get(repl->value);
+		printf("REPL VAL: %s\n", value);
+		switch (repl->type) {
+			case OS:        os_state->family     = value; break;
+			case OS_V1:     os_state->major      = value; break;
+			case OS_V2:     os_state->minor      = value; break;
+			case OS_V3:     os_state->patch      = value; break;
+			case OS_V4:     os_state->patchMinor = value; break;
+			default: break;
+		}
+
+		repl = repl->next;
+	}
+
+}
+
+static void apply_replacements_device(struct ua_parse_state *state, struct ua_expression_pair *pair, const char *matches[8]) {
+	struct ua_replacement *repl = pair->replacements;
+	struct ua_parse_state_user_agent *ua_state = &state->user_agent;
+
+	while (repl) {
+		const char* value = unique_strings_get(repl->value);
+		switch (repl->type) {
+			case FAMILY: ua_state->family = value; break;
+			case V1:     ua_state->major  = value; break;
+			case V2:     ua_state->minor  = value; break;
+			case V3:     ua_state->patch  = value; break;
+			default: break;
+		}
+		repl = repl->next;
+	}
+}
 
 struct user_agent_parser *user_agent_parser_create() {
 	struct user_agent_parser *ua_parser = malloc(sizeof(struct user_agent_parser));
 	ua_parser->user_agent_parser_group.expression_pairs = NULL;
 	ua_parser->os_parser_group.expression_pairs = NULL;
 	ua_parser->device_parser_group.expression_pairs = NULL;
+
+	ua_parser->user_agent_parser_group.apply_replacements_cb = &apply_replacements_user_agent;
+	ua_parser->os_parser_group.apply_replacements_cb         = &apply_replacements_os;
+	ua_parser->device_parser_group.apply_replacements_cb     = &apply_replacements_device;
 
 	yaml_parser_t parser;
 	FILE* fh = NULL;
@@ -161,11 +326,6 @@ struct user_agent_parser *user_agent_parser_create() {
 					state.scalar_type = VALUE;
 				} break;
 
-				case YAML_BLOCK_SEQUENCE_START_TOKEN: {
-					printf("block (SEQUENCE)\n");
-				} break;
-				/*case YAML_BLOCK_ENTRY_TOKEN: puts("block (ENTRY)\n"); break;*/
-
 				case YAML_BLOCK_END_TOKEN: {
 					struct ua_expression_pair *new_pair = state.new_expression_pair;
 					state.new_expression_pair = NULL;
@@ -176,8 +336,6 @@ struct user_agent_parser *user_agent_parser_create() {
 					if (new_pair != NULL) {
 						const char *error;
 						int erroffset;
-
-						puts("block END FINISHING PAIR\n");
 
 						// Compile the expression (handled here
 						pcre *re = pcre_compile(
@@ -195,6 +353,7 @@ struct user_agent_parser *user_agent_parser_create() {
 						// the new expression_pair, otherwise free the new pair and continue
 						if (re) {
 							new_pair->regex = re;
+							new_pair->pcre_extra = pcre_study(re, 0, &error);
 						} else {
 							printf("pcre error: %d %s\n", erroffset, error);
 							ua_expression_pair_destroy(new_pair);
@@ -206,7 +365,7 @@ struct user_agent_parser *user_agent_parser_create() {
 							printf("pcre %p\n", new_pair->regex);
 							struct ua_replacement *repl = new_pair->replacements;
 							while (repl) {
-								printf("\trepl type(%d): %s\n", repl->type, unique_strings_get(strings, repl->value));
+								printf("\trepl type(%d): %s\n", repl->type, unique_strings_get(repl->value));
 								repl = repl->next;
 							}
 						}
@@ -240,13 +399,16 @@ struct user_agent_parser *user_agent_parser_create() {
 									case MAKE_FOURCC('s','_','v','1'): state.current_replacement_type = OS_V1; break;
 									case MAKE_FOURCC('s','_','v','2'): state.current_replacement_type = OS_V2; break;
 									case MAKE_FOURCC('s','_','v','3'): state.current_replacement_type = OS_V3; break;
+									case MAKE_FOURCC('s','_','v','4'): state.current_replacement_type = OS_V4; break;
 									case MAKE_FOURCC('1','_','r','e'): state.current_replacement_type = V1; break;
 									case MAKE_FOURCC('2','_','r','e'): state.current_replacement_type = V2; break;
+									case MAKE_FOURCC('3','_','r','e'): state.current_replacement_type = V3; break;
 								}
 #undef MAKE_FOURCC
 
 							} else if (strstr(value, "_parsers") != NULL) {
 								state.key_type = PARSER;
+
 								// Switch to appropriate parsers group
 								if (strcmp(value, "user_agent_parsers") == 0) {
 									state.current_parser_group = &ua_parser->user_agent_parser_group;
@@ -259,7 +421,6 @@ struct user_agent_parser *user_agent_parser_create() {
 
 								// Switch to the new parser group's expression list
 								state.current_expression_pair_insert = &(state.current_parser_group->expression_pairs);
-								/*state.current_expression_pair_insert = ua_expression_pair_last(state.current_parser_group->expression_pairs);*/
 
 							} else if (strcmp(value, "regex_flag") == 0) {
 								state.key_type = REGEX_FLAG;
@@ -277,14 +438,12 @@ struct user_agent_parser *user_agent_parser_create() {
 								memset(state.new_expression_pair, 0, sizeof(struct ua_expression_pair));
 							}
 
-							/*printf("value type %d %s\n", state.key_type, value);*/
 							switch (state.key_type) {
 
 								case REGEX: {
 									// Ensure our scratch space is large enough the old the regular expression.
 									// Unfortunately the regular expression needs to be held onto until the block
 									// is finished due to the possible existence of a "regex_flags" value.
-									printf("regx: %s\n",  value);
 									const size_t regex_length = strlen(value) + 1;
 									if (state.regex_temp_size < regex_length) {
 										state.regex_temp = realloc(state.regex_temp, regex_length);
@@ -295,13 +454,12 @@ struct user_agent_parser *user_agent_parser_create() {
 								} break;
 
 								case REGEX_FLAG: {
-									printf("reg flag: %s\n",  value);
 									state.regex_flag = value[0];
 								} break;
 
 								case REPLACEMENT: {
 									if (state.current_replacement_type != UNKNOWN) {
-										printf("repl type: %d  val %s\n", state.current_replacement_type, value);
+										/*printf("repl type: %d  val %s\n", state.current_replacement_type, value);*/
 
 										// Create a new ua_replacement
 										struct ua_replacement *repl = malloc(sizeof(struct ua_replacement));
@@ -320,7 +478,6 @@ struct user_agent_parser *user_agent_parser_create() {
 							}
 							break;
 					}
-					/*printf("scalar: %s\n", token.data.scalar.value);*/
 					break;
 				}
 				default: break;
@@ -359,7 +516,29 @@ void user_agent_parser_destroy(struct user_agent_parser *ua_parser) {
 }
 
 
-void parse_user_agent(struct user_agent_info *info, const char* user_agent_string) {
+void user_agent_parse_string(struct user_agent_parser *ua_parser, struct user_agent_info *info, const char* user_agent_string) {
+	/*char buff[1024];*/
+	/*const char *buff_end = &buff[1024];*/
+	/*char *iter = &buff;*/
 
-	printf("user info %s", user_agent_string);
+
+	struct ua_parse_state state;
+	memset(&state, 0, sizeof(struct ua_parse_state));
+
+	ua_parser_group_exec(&ua_parser->user_agent_parser_group, &state, user_agent_string);
+	ua_parser_group_exec(&ua_parser->os_parser_group, &state, user_agent_string);
+
+	printf("ua:%s\n\n", user_agent_string);
+	printf("ua:\n\tfamily: %s\n\tmajor: %s\n\t minor: %s\n\t patch %s\n",
+			state.user_agent.family,
+			state.user_agent.major,
+			state.user_agent.minor,
+			state.user_agent.patch);
+
+	printf("os:\n\tfamily: %s\n\tmajor: %s\n\t minor: %s\n\t patch %s\n",
+			state.os.family,
+			state.os.major,
+			state.os.minor,
+			state.os.patch);
+
 }

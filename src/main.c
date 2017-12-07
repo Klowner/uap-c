@@ -27,7 +27,10 @@ int main(int argc, char** argv) {
 	struct user_agent_parser *parser = user_agent_parser_create();
 	const char* ua_string = "Mozilla/5.0 (X11; Linux x86_64; rv:57.0) Gecko/20100101 Firefox/57.0";
 	struct user_agent_info ua_info;
-	parse_user_agent(&ua_info, ua_string);
+
+	printf("\n\n\n");
+	user_agent_parse_string(parser, &ua_info, ua_string);
+
 	user_agent_parser_destroy(parser);
 
 	return 0;

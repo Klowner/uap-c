@@ -81,7 +81,7 @@ static struct unique_string_handle_t buffer_alloc(struct buffer_t* buffer, size_
 		buffer->data = realloc(buffer->data, buffer->capacity);
 	}
 
-	struct unique_string_handle_t ptr = { .addr = buffer->used };
+	struct unique_string_handle_t ptr = { .addr = buffer->used, .parent = buffer };
 	buffer->used += size;
 	return ptr;
 }
@@ -92,8 +92,12 @@ static char* buffer_addr(struct buffer_t *buffer, struct unique_string_handle_t 
 	return buffer->data + ptr.addr;
 }
 
-const char* unique_strings_get(struct unique_strings_t *strings, struct unique_string_handle_t ptr) {
-	return strings->buffer.data + ptr.addr;
+/*const char* unique_strings_get(struct unique_strings_t *strings, struct unique_string_handle_t ptr) {*/
+	/*return strings->buffer.data + ptr.addr;*/
+/*}*/
+
+const char* unique_strings_get(struct unique_string_handle_t handle) {
+	return handle.parent->data + handle.addr;
 }
 
 // Frees buffer's backing storage and resets usage data

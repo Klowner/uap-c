@@ -26,9 +26,8 @@ struct user_agent_info {
 struct user_agent_parser;
 
 struct user_agent_parser *user_agent_parser_create();
-
 void user_agent_parser_destroy(struct user_agent_parser *ua_parser);
+void user_agent_parse_string(struct user_agent_parser *ua_parser, struct user_agent_info *info, const char *user_agent_string);
 
-void parse_user_agent(struct user_agent_info *info, const char *user_agent_string);
 
 
