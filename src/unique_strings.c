@@ -9,11 +9,12 @@
 #define UNIQUE_STRING_BUCKETS 32
 #define MURMUR_SEED 0xf9a025a4 // random
 
+
 struct buffer_t {
 	size_t used;
 	size_t capacity;
 	char *data;
-} buffer;
+};
 
 
 struct string_hash_pair_t {
@@ -28,13 +29,52 @@ struct unique_string_node {
 	struct unique_string_handle_t buffer_ptr;
 };
 
+
 struct unique_strings_t {
 	struct buffer_t buffer;
 	struct unique_string_node **buckets; // pointer to an array of UNIQUE_STRING_BUCKETS pointers
 };
 
 
-static uint32_t murmur2_hash(const char *data, int len, uint32_t seed) {
+///###############################
+//# Simple managed growable buffer
+///###############################
+
+// Allocate a unique_string_handle_t associated with the requested size.
+// Use buffer_addr() to get an actual pointer
+static struct unique_string_handle_t buffer_alloc(struct buffer_t* buffer, size_t size) {
+	if (buffer->used + size >= buffer->capacity) {
+		buffer->capacity += 1024 * ((size / 1024) + 1); // grow by multiples of 1kB
+		buffer->data = realloc(buffer->data, buffer->capacity);
+	}
+
+	struct unique_string_handle_t ptr = {
+		.addr = buffer->used,
+		.parent = buffer
+	};
+
+	buffer->used += size;
+
+	return ptr;
+}
+
+
+// Frees buffer's backing storage and resets usage data
+static void buffer_clear(struct buffer_t *buffer) {
+	free(buffer->data);
+	buffer->capacity = 0;
+	buffer->used = 0;
+	buffer->data = NULL;
+}
+
+
+static void buffer_compact(struct buffer_t *buffer) {
+	buffer->data = realloc(buffer->data, buffer->used);
+	buffer->capacity = buffer->used;
+}
+
+
+static uint32_t hash_murmur2(const char *data, int len, uint32_t seed) {
 	const uint32_t m = 0x5bd1e995;
 	const int r = 24;
 
@@ -68,60 +108,17 @@ static uint32_t murmur2_hash(const char *data, int len, uint32_t seed) {
 	return h;
 }
 
-///###############################
-//# Simple managed growable buffer
-///###############################
-
-// Allocate a unique_string_handle_t associated with the requested size.
-// Use buffer_addr() to get an actual pointer
-static struct unique_string_handle_t buffer_alloc(struct buffer_t* buffer, size_t size) {
-	if (buffer->used + size >= buffer->capacity) {
-		buffer->capacity += 1024 * ((size / 1024) + 1); // grow by 1kB
-		buffer->data = realloc(buffer->data, buffer->capacity);
-	}
-
-	struct unique_string_handle_t ptr = { .addr = buffer->used, .parent = buffer };
-	buffer->used += size;
-	return ptr;
-}
-
-
-// Returns actual memory address for a unique_string_handle_t
-static char* buffer_addr(struct buffer_t *buffer, struct unique_string_handle_t ptr) {
-	return buffer->data + ptr.addr;
-}
-
-
-const char* unique_strings_get(struct unique_string_handle_t handle) {
-	return handle.parent->data + handle.addr;
-}
-
-
-// Frees buffer's backing storage and resets usage data
-static void buffer_clear(struct buffer_t *buffer) {
-	free(buffer->data);
-	buffer->capacity = 0;
-	buffer->used = 0;
-	buffer->data = NULL;
-}
-
-
-static void _buffer_compact(struct buffer_t *buffer) {
-	buffer->data = realloc(buffer->data, buffer->used);
-	buffer->capacity = buffer->used;
-}
-
 
 // Copies the string pointer to the string_hash_pair_t and generates
 // a hash from it. Also returns the hash.
-static uint32_t _string_hash_pair_prepare(struct string_hash_pair_t* shp, const char *str) {
+static uint32_t _string_hash_pair_prepare(struct string_hash_pair_t *shp, const char *str) {
 	shp->str = str;
-	shp->hash = murmur2_hash(str, strlen(str), MURMUR_SEED);
+	shp->hash = hash_murmur2(str, strlen(str), MURMUR_SEED);
 	return shp->hash;
 }
 
 
-struct unique_strings_t *unique_strings_create() {
+struct unique_strings_t * unique_strings_create() {
 	struct unique_strings_t *us = malloc(sizeof(struct unique_strings_t));
 	memset((void*)us, 0, sizeof(struct unique_strings_t));
 	us->buckets = malloc(sizeof(struct unique_string_node *) * UNIQUE_STRING_BUCKETS);
@@ -135,11 +132,15 @@ static uint32_t _get_bucket_index(const struct string_hash_pair_t *pair) {
 }
 
 
-// Returns true on successful find
-// `node` will point to node on success, otherwise
-// it will be set to point to the parent (used for insertion)
+static inline char * _unique_strings_get(const struct unique_string_handle_t *handle) {
+	return handle->parent->data + handle->addr;
+}
+
+
+// Returns true on successful find `node` will point to node on success,
+// otherwise it will be set to point to the parent (used for insertion)
 static bool _unique_strings_find_node(
-		struct unique_string_node** node,
+		struct unique_string_node **node,
 		struct unique_strings_t *us,
 		struct string_hash_pair_t *pair)
 {
@@ -152,9 +153,9 @@ static bool _unique_strings_find_node(
 		*node = iter;
 
 		if (iter->hash == pair_hash &&
-			strcmp(buffer_addr(&us->buffer, iter->buffer_ptr), pair->str) == 0)
+			strcmp(unique_strings_get(&iter->buffer_ptr), pair->str) == 0)
 		{
-			// found matching hash and string
+			// Found matching hash and string
 			return true;
 		}
 
@@ -170,9 +171,8 @@ static bool _unique_strings_find_node(
 }
 
 
-// Copies data from `pair` into `node`.
-// Hash is copied over, while the string data is allocated via
-// via the managed buffer.
+// Copies data from `pair` into `node`.  Hash is copied over, while the string
+// data is allocated via the managed buffer.
 static struct unique_string_node *unique_string_node_create(
 		struct string_hash_pair_t *pair,
 		struct buffer_t *buffer)
@@ -181,7 +181,7 @@ static struct unique_string_node *unique_string_node_create(
 	node->next = NULL;
 	node->hash = pair->hash;
 	node->buffer_ptr = buffer_alloc(buffer, strlen(pair->str) + 1);
-	char* ptr = buffer_addr(buffer, node->buffer_ptr);
+	char *ptr = _unique_strings_get(&node->buffer_ptr);
 	const size_t length = strlen(pair->str);
 	memcpy(ptr, pair->str, length + 1);
 	return node;
@@ -198,9 +198,9 @@ struct unique_string_handle_t unique_strings_add(struct unique_strings_t *us, co
 		struct unique_string_node *new_node = unique_string_node_create(&pair, &us->buffer);
 
 		if (found) {
-			// If parent is set, then it is the appropriate parent node
-			// for the new node. If it's null, then we just throw the new
-			// node into the appropriate bucket.
+			// If parent is set, then it is the appropriate parent node for the
+			// new node. If it's null, then we just throw the new node into the
+			// appropriate bucket.
 			new_node->next = found->next;
 			found->next = new_node;
 		} else {
@@ -223,15 +223,6 @@ static void _unique_string_free_nodes(struct unique_string_node *node) {
 }
 
 
-// Returns the pointer to the data buffer, this is to be called
-// after you're done using the unique_strings system and you
-// have valid pointers to all the strings. This unlinks the
-// monolithic string data buffer and resets all unique_strings_t
-// structures.
-/*const char* unique_string_extract_buffer(struct unique_strings_t *us) {*/
-/*}*/
-
-
 static void _unique_string_free_buckets(struct unique_strings_t *us) {
 	if (us->buckets) {
 		for (unsigned int i=0; i < UNIQUE_STRING_BUCKETS; i++) {
@@ -245,24 +236,27 @@ static void _unique_string_free_buckets(struct unique_strings_t *us) {
 }
 
 
-// Frees the bucketed structures, reducing the footprint of the
-// unique strings object to only hold the deduped string data.
+void unique_strings_destroy(struct unique_strings_t *us) {
+	if (us) {
+		_unique_string_free_buckets(us);
+		buffer_clear(&us->buffer);
+		free(us);
+	}
+}
+
+
+// Frees the bucket structures, reducing the footprint of the unique strings
+// object to only hold the deduped string data.
 void unique_strings_freeze(struct unique_strings_t *us) {
 	_unique_string_free_buckets(us);
-	_buffer_compact(us);
+	buffer_compact(&us->buffer);
 }
 
-void unique_strings_destroy(struct unique_strings_t *us) {
-	_unique_string_free_buckets(us);
-	buffer_clear(&us->buffer);
-	free(us);
+
+const char * unique_strings_get(const struct unique_string_handle_t *handle) {
+	return handle->parent->data + handle->addr;
 }
 
-void unique_strings_dump(struct unique_strings_t *us, const char *filename) {
-	FILE *fd = fopen(filename, "wb");
-	fwrite((void*)us->buffer.data, 1, us->buffer.used, fd);
-	fclose(fd);
-}
 
 bool unique_strings_owns(struct unique_strings_t *us, const char* str) {
 	return str >= us->buffer.data && str < (us->buffer.data + us->buffer.used);
