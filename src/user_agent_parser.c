@@ -6,10 +6,10 @@
 #include <stdlib.h>
 #include <yaml.h>
 
-#include "user_agent.h"
+#include "user_agent_parser.h"
 #include "unique_strings.h"
 
-#define MAX_PATTERN_MATCHES 10
+#define MAX_PATTERN_MATCHES 9
 
 
 struct ua_replacement {
@@ -100,6 +100,7 @@ struct user_agent_parser {
 	struct ua_parser_group os_parser_group;
 	struct ua_parser_group device_parser_group;
 	struct unique_strings_t *strings;
+	struct unique_string_handle_t string_handle_other; // handle -> "Other"
 	pcre *replacement_re;
 };
 
@@ -184,7 +185,7 @@ static void ua_parser_group_exec(
 
 			group->apply_replacements_cb(state, pair, &(substring_matches[0]), replacement_re);
 
-			// All done
+			// Found a match, all done
 			return;
 		}
 
@@ -689,6 +690,11 @@ int user_agent_parser_read_file(struct user_agent_parser *ua_parser, FILE *fd) {
 	// Create unique_strings_t for string deduping/packing of replacement strings
 	ua_parser->strings = unique_strings_create();
 
+	// device.family should default to "Other" if nothing is parsed, so we'll
+	// add "Other" as a unique string and grab a handle for possible later user.
+	ua_parser->string_handle_other = unique_strings_add(ua_parser->strings, "Other");
+
+
 	_user_agent_parser_parse_yaml(ua_parser, &parser);
 
 	// Free the YAML parser
@@ -718,6 +724,11 @@ void user_agent_parser_parse_string(struct user_agent_parser *ua_parser, struct 
 	ua_parser_group_exec(&ua_parser->user_agent_parser_group, &state, user_agent_string, ua_parser->replacement_re);
 	ua_parser_group_exec(&ua_parser->os_parser_group, &state, user_agent_string, ua_parser->replacement_re);
 	ua_parser_group_exec(&ua_parser->device_parser_group, &state, user_agent_string, ua_parser->replacement_re);
+
+	// Special case for device.family, if (null) then set to "Other"
+	if (state.device.family == NULL) {
+		state.device.family = unique_strings_get(&ua_parser->string_handle_other);
+	}
 
 	ua_parse_state_create_user_agent_info(info, &state);
 	ua_parse_state_destroy(&state, ua_parser->strings);

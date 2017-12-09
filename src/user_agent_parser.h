@@ -18,8 +18,8 @@ struct user_agent_info {
     } os;
 
 	struct {
-        const char *brand;
         const char *family;
+        const char *brand;
         const char *model;
     } device;
 };
