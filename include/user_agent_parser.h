@@ -22,6 +22,8 @@ struct user_agent_info {
         const char *brand;
         const char *model;
     } device;
+
+    const char *strings;
 };
 
 
@@ -36,13 +38,18 @@ struct user_agent_parser * user_agent_parser_create();
 int user_agent_parser_read_file(struct user_agent_parser *uap, FILE *fd);
 
 
+// Ingest a "regexes.yaml" from an in-memory buffer.
+int user_agent_parser_read_buffer(struct user_agent_parser *uap, const unsigned char *buffer, const size_t bufsize);
+
+
 // Destroy and free a user_agent_parser instance.
 void user_agent_parser_destroy(struct user_agent_parser *uap);
 
 
 // Parse a user agent string into the provided user_agent_info structure.
 // The user_agent_info instance can be reused for different user agent strings.
-void user_agent_parser_parse_string(
+// Returns the number of matched groups (user agent, os, device)
+int user_agent_parser_parse_string(
         struct user_agent_parser *uap,
         struct user_agent_info *info,
         const char *user_agent_string);

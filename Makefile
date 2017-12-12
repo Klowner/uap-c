@@ -1,20 +1,56 @@
-TARGET = user_agent
-LIBS = -lyaml -lpcre
-CC = clang
-SANITIZER_FLAGS = -fsanitize=address -fno-omit-frame-pointer
-CFLAGS = $(SANITIZER_FLAGS) -std=c99 -g -Wall
-LDFLAGS = $(SANITIZER_FLAGS) -g
-OBJECTS = $(patsubst %.c, %.o, $(wildcard src/*.c))
-HEADERS = $(wildcard *.h)
+CC= clang
+CFLAGS= -W -Wall
+CFLAGS+= -fno-omit-frame-pointer -g
+CFLAGS+= -O3 -fsanitize=address
 
-.PHONY: default all clean
+NAME=    uaparser
+MAJVER=  0
+MINVER=  1
+RELVER=  1
+VERSION= $(MAJVER).$(MINVER).$(RELVER)
 
-%.o: %.c $(HEADERS)
-	$(CC) $(CFLAGS) -c $< -o $@
+SLIB= lib$(NAME).a
+DLIB= lib$(NAME).$(VERSION).so
 
-$(TARGET): $(OBJECTS)
-	$(CC) $(OBJECTS) -Wall $(LDFLAGS) $(LIBS) -o $@
+SRC= $(wildcard src/*.c)
+INCLUDES= $(wildcard include/*.h)
 
+CFLAGS+= -Iinclude -Ibuild
+LDFLAGS+= -lyaml -lpcre
+
+OBJS= $(patsubst src/%.c,build/%.o,$(wildcard src/*.c))
+
+build:
+	@mkdir build
+
+build/%.o: src/%.c build
+	$(CC) $(CFLAGS) -c -o $@ $<
+
+$(SLIB): $(OBJS)
+	$(AR) -cvq $(SLIB) $(OBJS)
+
+$(DLIB): CFLAGS += -fPIC
+$(DLIB): LDFLAGS += -shared
+$(DLIB): $(OBJS)
+	$(CC) $(LDFLAGS) $^ -o $@
+
+.PHONY: shared-lib
+shared-lib: $(DLIB) $(SRC) $(INCLUDES)
+
+.PHONY: static-lib
+static-lib: $(SLIB) $(SRC) $(INCLUDES)
+
+build/regexes.yaml.h:
+	xxd -i uap-core/regexes.yaml > build/regexes.yaml.h
+
+uaparser: $(OBJS) build/regexes.yaml.h util/uaparser.o
+	$(CC) $(CFLAGS) $(OBJS) util/uaparser.o $(LDFLAGS) -o uaparser
+
+.PHONY: test
+test: $(SLIB) spec/tests.o
+	$(CC) $(CFLAGS) spec/tests.o -L. -l$(NAME) $(LDFLAGS) -o test
+	./test
+
+.PHONY: clean
 clean:
-	rm -f $(TARGET)
-	find src -iname "*.o" -exec rm {} \;
+	rm -rf build test *.a *.so spec/*.o src/*.o util/*.o
