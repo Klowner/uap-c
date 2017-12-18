@@ -9,8 +9,8 @@
 #include "user_agent_parser.h"
 #include "unique_strings.h"
 
-#define MAX_PATTERN_MATCHES 12
-
+#define MAX_PATTERN_MATCHES (32)
+#define SUBSTRING_VEC_COUNT (MAX_PATTERN_MATCHES*2)
 
 struct ua_replacement {
 	union {
@@ -92,8 +92,13 @@ struct ua_expression_pair {
 
 struct ua_parser_group {
 	struct ua_expression_pair* expression_pairs;
-	void (*apply_replacements_cb)(struct ua_parse_state*, struct ua_expression_pair*,
-			const char *matches[MAX_PATTERN_MATCHES], pcre *replacement_re);
+	void (*apply_replacements_cb)(
+			struct ua_parse_state*,
+			const char *ua_string,
+			struct ua_expression_pair*,
+			const int *matches_vector, // SUBSTRING_VEC_COUNT
+			const int num_matches,
+			pcre *replacement_re);
 };
 
 
@@ -153,10 +158,9 @@ static int ua_parser_group_exec(
 {
 	struct ua_expression_pair *pair = group->expression_pairs;
 	const size_t ua_string_length = strlen(ua_string);
-	const char *substring_matches[MAX_PATTERN_MATCHES];
-	memset(substring_matches, 0, sizeof(const char*) * MAX_PATTERN_MATCHES);
 
-	int substrings[64];
+	// @TODO urldecode ua_string
+	int matches_vector[SUBSTRING_VEC_COUNT];
 
 	while (pair) {
 		int pcre_result = pcre_exec(
@@ -166,66 +170,20 @@ static int ua_parser_group_exec(
 				ua_string_length,
 				0,
 				0,
-				substrings,
-				64);
+				matches_vector,
+				SUBSTRING_VEC_COUNT);
 
 		if (pcre_result > 0) {
-			// a smallish buffer to hold the extracted strings
-			char buffer[1024];
-			char *buffer_iter = &buffer[0];
-			int buffer_avail = 1024;
+			group->apply_replacements_cb(state, ua_string, pair, &matches_vector[0], pcre_result, replacement_re);
 
-			for (int i=0; i < pcre_result-1; i++) {
-				int copy_size = pcre_copy_substring(ua_string, substrings, pcre_result, i + 1, buffer_iter, buffer_avail);
-				assert(buffer_avail > (copy_size + 1));
-				if (copy_size) {
-					substring_matches[i] = buffer_iter;
-					buffer_avail -= copy_size;
-					buffer_iter += copy_size;
-
-					// Insert a null terminator
-					*buffer_iter = '\0';
-					buffer_iter++;
-					buffer_avail -= 1;
-				}
-			}
-
-			/*{ // debug*/
-				/*printf("string: %s\n", ua_string);*/
-				/*for (int i = 0; i < MAX_PATTERN_MATCHES; i++) {*/
-					/*if (substring_matches[i]) {*/
-						/*printf("match[%d]:\t%s\n", i, substring_matches[i]);*/
-					/*} else {*/
-						/*printf("match[%d]:\t-- no match --\n", i);*/
-					/*}*/
-				/*}*/
-				/*struct ua_replacement *repl = pair->replacements;*/
-				/*while (repl) {*/
-					/*printf("repl: %s\n", unique_strings_get(&repl->value));*/
-					/*repl = repl->next;*/
-				/*}*/
-				/*puts("\n");*/
-			/*}*/
-
-			group->apply_replacements_cb(state, pair, &(substring_matches[0]), replacement_re);
-
-			/*{*/
-				/*const char **field = &state->user_agent.family;*/
-				/*const char **end = (field + (sizeof(struct ua_parse_state) / sizeof(const char *)));*/
-				/*puts("\n");*/
-				/*while (field != end) {*/
-					/*printf("field: %s\n", *field);*/
-					/*field++;*/
-				/*}*/
-			/*}*/
-
-			// Found a match, all done
+			// Found a matching expression, all done.
 			return 1;
+
 		} else {
 			switch (pcre_result) {
 				case PCRE_ERROR_NOMATCH: break;
 				default:
-					printf("PCRE PROBLEEEEM %d\n", pcre_result);
+					printf("PCRE Error %d\n", pcre_result);
 			}
 		}
 
@@ -261,7 +219,7 @@ static void ua_parse_state_create_user_agent_info(
 		struct user_agent_info *info,
 		struct ua_parse_state *state)
 {
-	// Wipe the info	
+	// Wipe the info
 	memset(info, '\0', sizeof(struct user_agent_info));
 
 	// Calculate total buffer requirements for all info strings
@@ -312,8 +270,10 @@ static void ua_parse_state_create_user_agent_info(
 
 static void _apply_replacements(
 		const char **state_fields,
+		const char *ua_string,
 		struct ua_expression_pair *pair,
-		const char *matches[MAX_PATTERN_MATCHES],
+		const int *matches_vector, // SUBSTRING_VEC_COUNT
+		const int num_matches,
 		pcre *replacement_re)
 {
 	struct ua_replacement *repl = pair->replacements;
@@ -329,39 +289,80 @@ static void _apply_replacements(
 		// is allocated for the field value rather than just
 		// assigned to the unique_strings buffer. This is fine.
 		if (repl->has_placeholders) {
-			const char* src = unique_strings_get(&repl->value);
-			int out_size = strlen(src) + 1;
-			int substring_vec[MAX_PATTERN_MATCHES];
+			const char* replacement_str = unique_strings_get(&repl->value);
+			int out_size = strlen(replacement_str) + 1;
+			int replacements_vector[SUBSTRING_VEC_COUNT];
 
-			int pcre_res = pcre_exec(
-					replacement_re,
-					NULL, // simple expression; doesn't utilize study data
-					src,
-					strlen(src),
-					0,
-					0,
-					substring_vec,
-					32
-					);
 
-			if (pcre_res > 0) {
-				int replacement_index[MAX_PATTERN_MATCHES]; // lookup for matches[]
+			// At this phase we're scanning a replacement expression for the
+			// "$N" patterns and collecting their positions within the replacement string.
+			// These positions will determine where we inject the matched patterns from the
+			// original user agent string (identified by `substring_vec`)
+			//
+
+			int replacements_count = 0;
+			{
+				int repl_vec[6]; // pattern only has one expression, at most 2 matches
+				int start_offset = 0;
+				const int replacement_strlen = strlen(replacement_str);
+
+				while (start_offset < replacement_strlen && replacements_count < MAX_PATTERN_MATCHES) {
+					const int pcre_res = pcre_exec(
+						replacement_re,
+						NULL, // Simple expression; doesn't utilize study data.
+						replacement_str,
+						replacement_strlen,
+						start_offset,
+						0, // No options.
+						repl_vec,
+						6);
+
+					/*printf("match pcre_res: %s %d %d\n", replacement_str, replacement_strlen, pcre_res);*/
+					// Found a match
+					if (pcre_res > 0) {
+						replacements_vector[replacements_count * 2]     = repl_vec[0];
+						replacements_vector[replacements_count * 2 + 1] = repl_vec[1];
+						replacements_count++;
+						start_offset = repl_vec[1];
+					} else {
+						// No matches, exit the loop
+						start_offset = replacement_strlen;
+					}
+				}
+			}
+
+			/*printf("REPLACMENT COUNT %d %s\n", replacements_count, replacement_str);*/
+			// repl->has_placeholders is true, so this should always succeed.
+			if (replacements_count > 0) {
+				// lookup for ua_string/substring_vec[] positions
+				int replacement_index[MAX_PATTERN_MATCHES];
+
 				/*printf("outsize: %d %s\n", out_size, src);*/
 
-				for (int i = 0; i < (pcre_res - 1); i++) {
+				/*printf("replacement string: \"%s\" results: %d\n", replacement_str, pcre_res);*/
+				// Iterate over replacement identifier matches
+				for (int i = 0; i < replacements_count; i++) {
 					const char *match = NULL;
-					pcre_get_substring(src, substring_vec, pcre_res, i + 1, &(match));
+					/*pcre_get_substring(replacement_str, replacements_vector, pcre_res, i + 1, &(match));*/
 
 					// Convert the ASCII character to the matching integer
-					// ASCII '1' is 48, then subtract 1 so '$1' becomes 0, '$2' => 1, etc.
-					replacement_index[i] = (match[0] - 48 - 1);
-					pcre_free_substring(match);
+					// "$1" becomes integer 1. We don't start with the 0-position pattern match
+					// because that is the overall PCRE match result.
+					replacement_index[i] = replacement_str[replacements_vector[i*2] + 1] - 48;
+					assert(replacement_index[i] > 0 && replacement_index[i] < 10);
+					/*replacement_index[i] = (match[0] - 48);*/
+					/*pcre_free_substring(match);*/
+
+					/*printf("replacement_index[%d] = %d\n", i, replacement_index[i]);*/
+					const int idx = replacement_index[i];
+					const int replacement_strlen = matches_vector[idx * 2 + 1] - matches_vector[idx * 2];
+
+					/*printf("vector %d %d %d \n", i, replacements_vector[i*2], replacements_vector[i*2+1]);*/
 
 					// For each replacement match, we SUBTRACT 2 from the out_size (strlen("$1"))
 					// and then we ADD the size of the matches string that will be inserted
-					if (matches[replacement_index[i]]) {
-						out_size += (-2) + strlen(matches[replacement_index[i]]);
-						/*printf("repl %s %d\n", matches[replacement_index[i]], strlen(matches[replacement_index[i]]));*/
+					if (replacement_strlen > 0) {
+						out_size += (-2) + replacement_strlen;
 					}
 				}
 
@@ -369,61 +370,65 @@ static void _apply_replacements(
 
 				// Allocate a new buffer for the output
 				char *out = malloc(out_size);
-				memset(out, '\0', out_size);
+				memset(out, '\0', out_size); // @TODO remove
 
-				int write_index = 0;
-				int read_index = 0;
-				const char *read_ptr = src;
-				for (int i = 0; i < (pcre_res - 1); i++) {
-					// Copy everything from the replacement string up to the
-					// point of the match replacement identifier.
-					/*printf("substringvec[%d] == %d len: %d\n", i, substring_vec[(1+i) * 2], substring_vec[(1+i) * 2 + 1]);*/
-					
+				// Now combine matched user agent patterns with replacement patterns.
+				int write_index = 0; // to output.
+				int read_index = 0; // from replacement_str, eg: "Foo $5 Bar $2 Baz"
 
-					while (read_index < substring_vec[i * 2] ) {
-						/*char c = src[read_index];*/
-						printf("%c\n", src[read_index]);
-						/*puts(src[read_index]);*/
-						out[write_index++] = src[read_index++]; //*read_ptr;
-						/*read_ptr++;*/
+				/** REPLACEMENT BEGIN **/
+				/*printf("pcre_res %d\n", pcre_res);*/
+				for (int i = 0; i < replacements_count; i++) {
+
+					// Copy everything from the replacement string leading up
+					// to the point of the first match.
+					//
+					// "Foo $5 Bar $2 Baz"
+					//  ---^
+					/*const int rv_idx = replacement_index[i] - 1; // $1 -> 1 -> 0*/
+					/*printf("rv_idx %d %d\n", rv_idx, i);*/
+					while (read_index < replacements_vector[i * 2]) {
+						out[write_index++] = replacement_str[read_index++];
 					}
+
+					// Advance the read_index by 2 bytes to skip the "$N" which
+					// we should now be at.
+					//
+					// "Foo $5 Bar $2 Baz"
+					//  ------^
+					/*if (replacement_str[read_index] != '$') {*/
+						/*printf("repl failed: %s %d %d\n", replacement_str, read_index, replacements_vector[rv_idx]);*/
+					/*}*/
+					assert(replacement_str[read_index] == '$');
 					read_index += 2;
 
-					// Advance the read_ptr past the match replacement
-					// identifier eg: "$1"
-					/*read_ptr += 2;*/
-					/*read_index += 2;*/
+					// Ensure we're not going to look up a match item which
+					// isn't actually present in the match_vector.
+					assert(replacement_index[i] <= num_matches);
 
-					// Copy the matched pattern data
-					if (matches[replacement_index[i]]) {
-						
-						const char *match_read_ptr = matches[replacement_index[i]];
-						while (*match_read_ptr != '\0') {
-							/*printf("%c\n", *match_read_ptr);*/
-							out[write_index++] = *match_read_ptr;
-							match_read_ptr++;
-						}
+					// Copy the matched pattern from the original user agent
+					// string, identified by `matches_vector`.
+
+					int match_start     = matches_vector[replacement_index[i] * 2];
+					const int match_end = matches_vector[replacement_index[i] * 2 + 1];
+					/*printf("COPYING MATCH %s [%d-%d] w:%d o:%d\n", ua_string, match_start, match_end, write_index, out_size);*/
+					while (match_start < match_end) {
+						out[write_index++] = ua_string[match_start++];
 					}
+					/*printf("in: \"%s\" out: \"%s\"\n", replacement_str, out);*/
 				}
 
-				/*printf("cool\n");*/
-				// Copy any remaining replacement string to the output
-				while (write_index < out_size-1) {
-					out[write_index++] = src[read_index++]; //read_ptr;
-					/*read_ptr++;*/
+				// Copy any remaining replacement string data
+				while (write_index < out_size - 1) {
+					out[write_index++] = replacement_str[read_index++];
 				}
 
-				// Cap it!
+				// null terminator
+				// @TODO remove?
 				out[write_index] = '\0';
 
 				// All done
 				*dest = out;
-				/*printf("replacements performed!: %s\n", *dest);*/
-				/*for (int i = 0; i < MAX_PATTERN_MATCHES; i++) {*/
-					/*if (matches[i]) {*/
-						/*printf("repl: %d %s\n", i, matches[i]);*/
-					/*}*/
-				/*}*/
 			}
 		} else {
 			*dest = unique_strings_get(&repl->value);
@@ -434,7 +439,7 @@ static void _apply_replacements(
 }
 
 
-static void _apply_defaults(
+static void _apply_defaults_2(
 		const char **field,
 		int num_fields,
 		const char *matches[MAX_PATTERN_MATCHES])
@@ -452,8 +457,55 @@ static void _apply_defaults(
 	}
 }
 
+static void _apply_defaults(
+		const char **field,
+		const char *ua_string,
+		const int num_fields,
+		const int *matches_vector,
+		const int num_matches)
+{
+#define MIN(_a, _b) (_a < _b ? _a : _b)
+	const int max_iterations = MIN(num_fields, (num_matches-1));
+#undef MIN
+
+	for (int i = 0; i < max_iterations; i++) {
+		if (!*field) {
+			const mv_idx = (i + 1) * 2;
+			const size_t len = matches_vector[mv_idx + 1] - matches_vector[mv_idx];
+			char *out = malloc(len + 1);
+			memset(out, 0, len+1);
+			/*printf("copying %s %d:%d\n", ua_string, matches_vector[mv_idx], len);*/
+			memcpy(out, &ua_string[matches_vector[mv_idx]], len);
+			/*out[len] = '\0';*/
+			*field = out;
+		}
+		++field;
+	}
+}
 
 static void _apply_defaults_for_device(
+		const char **field,
+		const char *ua_string,
+		const int num_fields,
+		const int *matches_vector,
+		const int num_matches)
+{
+#define MIN(_a, _b) (_a < _b ? _a : _b)
+	const int max_iterations = MIN(num_fields, (num_matches-1));
+#undef MIN
+
+	/*const char **fields[] = { &device->family, &device->model };*/
+	for (int i = 0; i < 2; i++) {
+		// If the field is undefined, use the first matched pattern if available
+		/*if (!*fields[i] && matches[0]) {*/
+			/*const size_t len = strlen(matches[0]) + 1;*/
+			/**fields[i] = malloc(len);*/
+			/*memcpy((void*)*fields[i], matches[0], len);*/
+		/*}*/
+	}
+}
+
+static void _apply_defaults_for_device_2(
 		struct ua_parse_state_device *device,
 		const char *matches[MAX_PATTERN_MATCHES])
 {
@@ -471,34 +523,42 @@ static void _apply_defaults_for_device(
 
 inline static void apply_replacements_user_agent(
 		struct ua_parse_state *state,
+		const char *ua_string,
 		struct ua_expression_pair *pair,
-		const char *matches[MAX_PATTERN_MATCHES],
+		const int *matches_vector, // SUBSTRING_VEC_COUNT
+		const int num_matches,
 		pcre *replacement_re)
 {
-	_apply_replacements((const char**)&state->user_agent, pair, matches, replacement_re);
-	_apply_defaults((const char**)&state->user_agent, 4, matches); 
+	_apply_replacements((const char**)&state->user_agent, ua_string, pair, matches_vector, num_matches, replacement_re);
+	/*_apply_defaults((const char**)&state->user_agent, 4, matches);*/
+	_apply_defaults((const char**)&state->user_agent, ua_string, 4, matches_vector, num_matches);
 }
 
 
 inline static void apply_replacements_os(
 		struct ua_parse_state *state,
+		const char *ua_string,
 		struct ua_expression_pair *pair,
-		const char *matches[MAX_PATTERN_MATCHES],
+		const int *matches_vector, // SUBSTRING_VEC_COUNT
+		const int num_matches,
 		pcre *replacement_re)
 {
-	_apply_replacements((const char**)&state->os, pair, matches, replacement_re);
-	_apply_defaults((const char**)&state->os, 5, matches);
+	_apply_replacements((const char**)&state->os, ua_string, pair, matches_vector, num_matches, replacement_re);
+	/*_apply_defaults((const char**)&state->os, 5, matches);*/
+	_apply_defaults((const char**)&state->os, ua_string, 5, matches_vector, num_matches);
 }
 
 
 inline static void apply_replacements_device(
 		struct ua_parse_state *state,
+		const char *ua_string,
 		struct ua_expression_pair *pair,
-		const char *matches[MAX_PATTERN_MATCHES],
+		const int *matches_vector, // SUBSTRING_VEC_COUNT
+		const int num_matches,
 		pcre *replacement_re)
 {
-	_apply_replacements((const char**)&state->device, pair, matches, replacement_re);
-	_apply_defaults_for_device(&state->device, matches);
+	_apply_replacements((const char**)&state->device, ua_string, pair, matches_vector, num_matches, replacement_re);
+	/*_apply_defaults_for_device(&state->device, matches);*/
 }
 
 
@@ -518,7 +578,7 @@ struct user_agent_parser *user_agent_parser_create() {
 	{
 		const char *error;
 		int error_offset;
-		ua_parser->replacement_re = pcre_compile("\\$(\\d)", PCRE_UTF8, &error, &error_offset, NULL);
+		ua_parser->replacement_re = pcre_compile("\\$\\d", PCRE_UTF8, &error, &error_offset, NULL);
 		assert(ua_parser->replacement_re);
 	}
 
