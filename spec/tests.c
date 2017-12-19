@@ -144,6 +144,7 @@ static void run_test_file(
 								} else {
 									printf("\n%s\n in: \"%s\" != out: \"%s\"\n", state.item.value[0], state.item.value[i], *fields);
 									assert(0);
+									exit(1);
 								}
 							}
 							fields++;
