@@ -84,6 +84,9 @@ static void run_test_file(
 	};
 
 	yaml_token_t token;
+	memset(&token, 0, sizeof(yaml_token_t));
+
+	struct user_agent_info *ua_info = user_agent_info_create();
 
 	do {
 		yaml_token_delete(&token);
@@ -128,7 +131,7 @@ static void run_test_file(
 
 				// See if we have a mostly valid looking record
 				if (state.item.value[0] != NULL) {
-					struct user_agent_info *ua_info = user_agent_info_create();
+					/*struct user_agent_info *ua_info = user_agent_info_create();*/
 					if (user_agent_parser_parse_string(ua_parser, ua_info, state.item.value[0])) {
 
 						/*printf("\n%s\n", state.item.value[0]);*/
@@ -137,7 +140,7 @@ static void run_test_file(
 							if (state.item.value[i] && *state.item.value[i]) {
 								/*printf("%s\t=>\t%s\n", state.item.value[i], *fields);*/
 								if (strcmp(state.item.value[i], *fields) == 0) {
-									printf("*");
+									/*printf("*");*/
 								} else {
 									printf("\n%s\n in: \"%s\" != out: \"%s\"\n", state.item.value[0], state.item.value[i], *fields);
 									assert(0);
@@ -146,7 +149,7 @@ static void run_test_file(
 							fields++;
 						}
 					}
-					user_agent_info_destroy(ua_info);
+					/*user_agent_info_destroy(ua_info);*/
 				}
 
 				// Clear the current state
@@ -166,6 +169,7 @@ static void run_test_file(
 		state.item.value[i] = NULL;
 	}
 
+	user_agent_info_destroy(ua_info);
 	yaml_parser_delete(&yaml_parser);
 }
 

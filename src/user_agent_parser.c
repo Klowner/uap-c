@@ -213,8 +213,8 @@ static void ua_parse_state_create_user_agent_info(
 		struct user_agent_info *info,
 		struct ua_parse_state *state)
 {
-	// Wipe the info
-	memset(info, '\0', sizeof(struct user_agent_info));
+	/*// Wipe the info*/
+	/*memset(info, '\0', sizeof(struct user_agent_info));*/
 
 	// Calculate total buffer requirements for all info strings
 	size_t size = 0;
@@ -231,7 +231,11 @@ static void ua_parse_state_create_user_agent_info(
 	// attached to the user_agent_info structure which has a
 	// lifetime beyond this system, so it will need to be freed.
 	// (automatically handled by user_agent_info_free());
-	char *buffer = malloc(size);
+	char *buffer = realloc((void*)info->strings, size);
+
+	// Wipe the info entirely (overwriting info->strings as well,
+	// but we'll re-attach that near the end)
+	memset(info, '\0', sizeof(struct user_agent_info));
 
 	// Go back to the first field to begin copying to the buffer
 	{
@@ -462,7 +466,7 @@ static void _apply_defaults_for_device(
 		const int *matches_vector,
 		const int num_matches)
 {
-	if (num_matches) {
+	if (num_matches > 1) {
 		const char **fields[] = { &device->family, &device->model };
 		for (int i = 0; i < 2; i++) {
 			// If the field is undefined, use the first matched pattern if available
