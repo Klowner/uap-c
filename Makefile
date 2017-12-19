@@ -1,7 +1,7 @@
-CC= clang
+CC= gcc
 CFLAGS= -W -Wall
-CFLAGS+= -fno-omit-frame-pointer -g
-CFLAGS+= -O3 -fsanitize=address
+CFLAGS+= -O3
+#CFLAGS+= -g -fno-omit-frame-pointer-fsanitize=address
 
 NAME=    uaparser
 MAJVER=  0

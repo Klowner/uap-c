@@ -95,9 +95,15 @@ static uint32_t hash_murmur2(const char *data, int len, uint32_t seed) {
 	}
 
 	switch (len) {
-		case 3: h ^= data[2] << 16;
-		case 2: h ^= data[1] << 8;
-		case 1: h ^= data[0];
+		case 3:
+			h ^= data[2] << 16;
+			// FALLTHRU
+		case 2:
+			h ^= data[1] << 8;
+			// FALLTHRU
+		case 1:
+			h ^= data[0];
+			// FALLTHRU
 		default:
 			h *= m;
 	}

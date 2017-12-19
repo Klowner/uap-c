@@ -1,3 +1,4 @@
+#include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -37,7 +38,8 @@ static int get_field_index_for_devices_test(const char *str) {
 		case MAKE_FOURCC('f','a','m','i'): return 1;
 		case MAKE_FOURCC('b','r','a','n'): return 2;
 		case MAKE_FOURCC('m','o','d','e'): return 3;
-		default: return -1;
+		default:
+			return -1;
 	}
 }
 
@@ -98,7 +100,7 @@ static void run_test_file(
 						const uint32_t fourcc = MAKE_FOURCC(value[0], value[1], value[2], value[3]);
 						switch (fourcc) {
 							case MAKE_FOURCC('u','s','e','r'):
-								state.item.value_index = 0; // -1 is user_agent_string
+								state.item.value_index = 0; // 0 is user_agent_string
 								break;
 							default:
 								// Field index is determined by callback function
@@ -137,7 +139,8 @@ static void run_test_file(
 								if (strcmp(state.item.value[i], *fields) == 0) {
 									printf("*");
 								} else {
-									printf("\n!%s\n in: \"%s\" != out: \"%s\"\n", state.item.value[0], state.item.value[i], *fields);
+									printf("\n%s\n in: \"%s\" != out: \"%s\"\n", state.item.value[0], state.item.value[i], *fields);
+									assert(0);
 								}
 							}
 							fields++;
@@ -184,7 +187,7 @@ int main(int argc, char** argv) {
 
 	run_test_file("uap-core/tests/test_ua.yaml", 0, ua_parser, &get_field_index_for_ua_test);
 	run_test_file("uap-core/tests/test_os.yaml", 4, ua_parser, &get_field_index_for_os_test);
-	/*run_test_file("uap-core/tests/test_device.yaml", 9, ua_parser, &get_field_index_for_devices_test);*/
+	run_test_file("uap-core/tests/test_device.yaml", 9, ua_parser, &get_field_index_for_devices_test);
 
 	user_agent_parser_destroy(ua_parser);
 	return 0;

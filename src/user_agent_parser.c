@@ -1,4 +1,4 @@
-/*#define NDEBUG*/
+#define NDEBUG
 #include <assert.h>
 #include <pcre.h>
 #include <stdbool.h>
@@ -86,7 +86,6 @@ struct ua_expression_pair {
 	pcre_extra *pcre_extra;
 	struct ua_replacement *replacements;
 	struct ua_expression_pair *next;
-	/*const char *expr;*/
 };
 
 
@@ -136,10 +135,6 @@ static void ua_expression_pair_destroy(struct ua_expression_pair *pair) {
 
 	while (pair) {
 		next = pair->next;
-
-/*#ifndef NDEBUG*/
-		/*free((void*)pair->expr);*/
-/*#endif*/
 
 		ua_replacement_destroy(pair->replacements);
 		pcre_free(pair->regex);
@@ -206,7 +201,6 @@ static void ua_parse_state_destroy(struct ua_parse_state *state, struct unique_s
 
 	while ((const char**)field < end) {
 		if (!unique_strings_owns(strings, *field)) {
-			/*printf("freeing %p\n", *field);*/
 			free(*field);
 			*field = NULL;
 		}
@@ -278,7 +272,15 @@ static void _apply_replacements(
 {
 	struct ua_replacement *repl = pair->replacements;
 
-	/*printf("expr: %s\n", pair->expr);*/
+	{
+		int i = 0;
+		while (repl) {
+			repl = repl->next;
+			i++;
+		}
+	}
+	repl = pair->replacements;
+
 	while (repl) {
 		// state_fields points to the first field, so the repl->type enum
 		// can be used to adjust the pointer to the appropriate field.
@@ -317,7 +319,6 @@ static void _apply_replacements(
 						repl_vec,
 						6);
 
-					/*printf("match pcre_res: %s %d %d\n", replacement_str, replacement_strlen, pcre_res);*/
 					// Found a match
 					if (pcre_res > 0) {
 						replacements_vector[replacements_count * 2]     = repl_vec[0];
@@ -331,33 +332,27 @@ static void _apply_replacements(
 				}
 			}
 
-			/*printf("REPLACMENT COUNT %d %s\n", replacements_count, replacement_str);*/
 			// repl->has_placeholders is true, so this should always succeed.
 			if (replacements_count > 0) {
 				// lookup for ua_string/substring_vec[] positions
 				int replacement_index[MAX_PATTERN_MATCHES];
 
-				/*printf("outsize: %d %s\n", out_size, src);*/
-
-				/*printf("replacement string: \"%s\" results: %d\n", replacement_str, pcre_res);*/
 				// Iterate over replacement identifier matches
 				for (int i = 0; i < replacements_count; i++) {
-					const char *match = NULL;
-					/*pcre_get_substring(replacement_str, replacements_vector, pcre_res, i + 1, &(match));*/
-
 					// Convert the ASCII character to the matching integer
 					// "$1" becomes integer 1. We don't start with the 0-position pattern match
 					// because that is the overall PCRE match result.
 					replacement_index[i] = replacement_str[replacements_vector[i*2] + 1] - 48;
 					assert(replacement_index[i] > 0 && replacement_index[i] < 10);
-					/*replacement_index[i] = (match[0] - 48);*/
-					/*pcre_free_substring(match);*/
 
-					/*printf("replacement_index[%d] = %d\n", i, replacement_index[i]);*/
+					if (replacement_index[i] < 1 || replacement_index[i] > 9) {
+						// Invalid replacement index, this is likely an input error of regexes.yaml
+						// and so we'll treat it as a fatal error, since it could cause a buffer overflow.
+						return;
+					}
+
 					const int idx = replacement_index[i];
 					const int replacement_strlen = matches_vector[idx * 2 + 1] - matches_vector[idx * 2];
-
-					/*printf("vector %d %d %d \n", i, replacements_vector[i*2], replacements_vector[i*2+1]);*/
 
 					// For each replacement match, we SUBTRACT 2 from the out_size (strlen("$1"))
 					// and then we ADD the size of the matches string that will be inserted
@@ -365,8 +360,6 @@ static void _apply_replacements(
 						out_size += (-2) + replacement_strlen;
 					}
 				}
-
-				/*printf("outsize: %d\n", out_size);*/
 
 				// Allocate a new buffer for the output
 				char *out = malloc(out_size);
@@ -376,8 +369,6 @@ static void _apply_replacements(
 				int write_index = 0; // to output.
 				int read_index = 0; // from replacement_str, eg: "Foo $5 Bar $2 Baz"
 
-				/** REPLACEMENT BEGIN **/
-				/*printf("pcre_res %d\n", pcre_res);*/
 				for (int i = 0; i < replacements_count; i++) {
 
 					// Copy everything from the replacement string leading up
@@ -385,8 +376,6 @@ static void _apply_replacements(
 					//
 					// "Foo $5 Bar $2 Baz"
 					//  ---^
-					/*const int rv_idx = replacement_index[i] - 1; // $1 -> 1 -> 0*/
-					/*printf("rv_idx %d %d\n", rv_idx, i);*/
 					while (read_index < replacements_vector[i * 2]) {
 						out[write_index++] = replacement_str[read_index++];
 					}
@@ -396,36 +385,38 @@ static void _apply_replacements(
 					//
 					// "Foo $5 Bar $2 Baz"
 					//  ------^
-					/*if (replacement_str[read_index] != '$') {*/
-						/*printf("repl failed: %s %d %d\n", replacement_str, read_index, replacements_vector[rv_idx]);*/
-					/*}*/
 					assert(replacement_str[read_index] == '$');
 					read_index += 2;
 
-					// Ensure we're not going to look up a match item which
-					// isn't actually present in the match_vector.
-					assert(replacement_index[i] <= num_matches);
-
 					// Copy the matched pattern from the original user agent
 					// string, identified by `matches_vector`.
-
 					int match_start     = matches_vector[replacement_index[i] * 2];
 					const int match_end = matches_vector[replacement_index[i] * 2 + 1];
-					/*printf("COPYING MATCH %s [%d-%d] w:%d o:%d\n", ua_string, match_start, match_end, write_index, out_size);*/
+
 					while (match_start < match_end) {
 						out[write_index++] = ua_string[match_start++];
 					}
-					/*printf("in: \"%s\" out: \"%s\"\n", replacement_str, out);*/
 				}
 
 				// Copy any remaining replacement string data
-				while (write_index < out_size - 1) {
+				while (replacement_str[read_index]) {
 					out[write_index++] = replacement_str[read_index++];
 				}
 
-				// null terminator
-				// @TODO remove?
-				out[write_index] = '\0';
+				// Trim leading whitespace
+				{
+					int i = 0;
+					while (i < out_size && out[i] == ' ') i++;
+
+					for (int j = i; j < out_size; j++) {
+						out[j - i] = out[j];
+					}
+				}
+
+				// Trim trailing whitespace
+				while (write_index > 0 && out[--write_index] == ' ') {
+					out[write_index] = '\0';
+				}
 
 				// All done
 				*dest = out;
@@ -438,24 +429,6 @@ static void _apply_replacements(
 	}
 }
 
-
-static void _apply_defaults_2(
-		const char **field,
-		int num_fields,
-		const char *matches[MAX_PATTERN_MATCHES])
-{
-	for (int i=0; i < num_fields; i++) {
-		if (!*field) {
-			if (matches[i]) {
-				const size_t len = strlen(matches[i]) + 1;
-				char *out = malloc(len);
-				memcpy(out, matches[i], len);
-				*field = out;
-			}
-		}
-		++field;
-	}
-}
 
 static void _apply_defaults(
 		const char **field,
@@ -470,52 +443,35 @@ static void _apply_defaults(
 
 	for (int i = 0; i < max_iterations; i++) {
 		if (!*field) {
-			const mv_idx = (i + 1) * 2;
+			const int mv_idx = (i + 1) * 2;
 			const size_t len = matches_vector[mv_idx + 1] - matches_vector[mv_idx];
 			char *out = malloc(len + 1);
 			memset(out, 0, len+1);
-			/*printf("copying %s %d:%d\n", ua_string, matches_vector[mv_idx], len);*/
 			memcpy(out, &ua_string[matches_vector[mv_idx]], len);
-			/*out[len] = '\0';*/
 			*field = out;
 		}
+
 		++field;
 	}
 }
 
+
 static void _apply_defaults_for_device(
-		const char **field,
+		struct ua_parse_state_device *device,
 		const char *ua_string,
-		const int num_fields,
 		const int *matches_vector,
 		const int num_matches)
 {
-#define MIN(_a, _b) (_a < _b ? _a : _b)
-	const int max_iterations = MIN(num_fields, (num_matches-1));
-#undef MIN
-
-	/*const char **fields[] = { &device->family, &device->model };*/
-	for (int i = 0; i < 2; i++) {
-		// If the field is undefined, use the first matched pattern if available
-		/*if (!*fields[i] && matches[0]) {*/
-			/*const size_t len = strlen(matches[0]) + 1;*/
-			/**fields[i] = malloc(len);*/
-			/*memcpy((void*)*fields[i], matches[0], len);*/
-		/*}*/
-	}
-}
-
-static void _apply_defaults_for_device_2(
-		struct ua_parse_state_device *device,
-		const char *matches[MAX_PATTERN_MATCHES])
-{
-	const char **fields[] = { &device->family, &device->model };
-	for (int i = 0; i < 2; i++) {
-		// If the field is undefined, use the first matched pattern if available
-		if (!*fields[i] && matches[0]) {
-			const size_t len = strlen(matches[0]) + 1;
-			*fields[i] = malloc(len);
-			memcpy((void*)*fields[i], matches[0], len);
+	if (num_matches) {
+		const char **fields[] = { &device->family, &device->model };
+		for (int i = 0; i < 2; i++) {
+			// If the field is undefined, use the first matched pattern if available
+			if (!*fields[i]) {
+				const size_t len = matches_vector[2 + 1] - matches_vector[2];
+				*fields[i] = malloc(len + 1);
+				memset((void*)*fields[i], 0, len + 1);
+				memcpy((void*)*fields[i], &ua_string[matches_vector[2]], len);
+			}
 		}
 	}
 }
@@ -530,7 +486,6 @@ inline static void apply_replacements_user_agent(
 		pcre *replacement_re)
 {
 	_apply_replacements((const char**)&state->user_agent, ua_string, pair, matches_vector, num_matches, replacement_re);
-	/*_apply_defaults((const char**)&state->user_agent, 4, matches);*/
 	_apply_defaults((const char**)&state->user_agent, ua_string, 4, matches_vector, num_matches);
 }
 
@@ -544,7 +499,6 @@ inline static void apply_replacements_os(
 		pcre *replacement_re)
 {
 	_apply_replacements((const char**)&state->os, ua_string, pair, matches_vector, num_matches, replacement_re);
-	/*_apply_defaults((const char**)&state->os, 5, matches);*/
 	_apply_defaults((const char**)&state->os, ua_string, 5, matches_vector, num_matches);
 }
 
@@ -558,7 +512,7 @@ inline static void apply_replacements_device(
 		pcre *replacement_re)
 {
 	_apply_replacements((const char**)&state->device, ua_string, pair, matches_vector, num_matches, replacement_re);
-	/*_apply_defaults_for_device(&state->device, matches);*/
+	_apply_defaults_for_device(&state->device, ua_string, matches_vector, num_matches);
 }
 
 
@@ -637,6 +591,7 @@ static void _user_agent_parser_parse_yaml(struct user_agent_parser *ua_parser, y
 
 	yaml_token_t token;
 	memset(&token, 0, sizeof(yaml_token_t));
+
 	// Parse. That. Yaml.
 	do {
 		yaml_token_delete(&token);
@@ -683,14 +638,17 @@ static void _user_agent_parser_parse_yaml(struct user_agent_parser *ua_parser, y
 							new_pair->regex = re;
 							new_pair->pcre_extra = pcre_study(re, 0, &error);
 							state.regex_flag = '\0';
-							if (state.regex_temp == NULL) {
-								printf("IT IS NULL");
-							}
-							/*printf("temp: %s\n", state.regex_temp);*/
 						} else {
 							printf("pcre error: %d %s\n", erroffset, error);
 							ua_expression_pair_destroy(new_pair);
 							break;
+						}
+
+						int i = 0;
+						struct ua_replacement *repl = new_pair->replacements;
+						while (repl) {
+							i++;
+							repl = repl->next;
 						}
 
 						if (state.current_expression_pair_insert) {
@@ -819,7 +777,6 @@ static void _user_agent_parser_parse_yaml(struct user_agent_parser *ua_parser, y
 									state.regex_temp_size = regex_length;
 								}
 								memcpy(state.regex_temp, value, regex_length);
-
 							} break;
 
 							case REGEX_FLAG: {
@@ -839,7 +796,9 @@ static void _user_agent_parser_parse_yaml(struct user_agent_parser *ua_parser, y
 							} break;
 
 
-							default: break;
+							default:
+								printf("WARNING INVALID KEY TYPE *****\n");
+								break;
 						}
 						break;
 				}
@@ -918,7 +877,7 @@ int user_agent_parser_parse_string(struct user_agent_parser *ua_parser, struct u
 
 	// Special case for family, if (null) then set to "Other"
 	const char **family[] = { &state.device.family, &state.os.family, &state.user_agent.family };
-	for (int i=0; i < 3; i++) {
+	for (int i = 0; i < 3; i++) {
 		if (*family[i] == NULL) {
 			*family[i] = unique_strings_get(&ua_parser->string_handle_other);
 		}
