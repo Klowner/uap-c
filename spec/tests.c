@@ -190,9 +190,18 @@ int main(int argc, char** argv) {
 		return -1;
 	}
 
+	// Base tests
 	run_test_file("../uap-core/tests/test_ua.yaml", 0, ua_parser, &get_field_index_for_ua_test);
 	run_test_file("../uap-core/tests/test_os.yaml", 4, ua_parser, &get_field_index_for_os_test);
 	run_test_file("../uap-core/tests/test_device.yaml", 9, ua_parser, &get_field_index_for_devices_test);
+
+	// Additional tests
+	run_test_file("../uap-core/test_resources/firefox_user_agent_strings.yaml", 0, ua_parser, &get_field_index_for_ua_test);
+	run_test_file("../uap-core/test_resources/opera_mini_user_agent_strings.yaml", 0, ua_parser, &get_field_index_for_ua_test);
+	run_test_file("../uap-core/test_resources/podcasting_user_agent_strings.yaml", 0, ua_parser, &get_field_index_for_ua_test);
+	run_test_file("../uap-core/test_resources/additional_os_tests.yaml", 4, ua_parser, &get_field_index_for_os_test);
+	run_test_file("../uap-core/test_resources/pgts_browser_list.yaml", 0, ua_parser, &get_field_index_for_ua_test);
+	// ^ this thing is 2MB of user agent strings, and so it takes forever to run.
 
 	user_agent_parser_destroy(ua_parser);
 	return 0;
