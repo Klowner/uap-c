@@ -60,6 +60,11 @@ static void run_test_file(
 	FILE *fd = fopen(filepath, "rb");
 	yaml_parser_set_input_file(&yaml_parser, fd);
 
+	printf("Running test cases: \"%s\" ...  ", filepath);
+	const char progress[] = "-\\|/-\\|/";
+
+	fflush(stdout);
+
 	struct {
 		enum {
 			UNKNOWN_SCALAR_TYPE,
@@ -88,6 +93,8 @@ static void run_test_file(
 
 	struct user_agent_info *ua_info = user_agent_info_create();
 
+	int num_passed = 0;
+	int num_failed = 0;
 	do {
 		yaml_token_delete(&token);
 		yaml_parser_scan(&yaml_parser, &token);
@@ -134,23 +141,28 @@ static void run_test_file(
 					/*struct user_agent_info *ua_info = user_agent_info_create();*/
 					if (user_agent_parser_parse_string(ua_parser, ua_info, state.item.value[0])) {
 
+						// Little progress doo-dad
+						printf("\b%c", progress[num_passed % strlen(progress)]);
+						fflush(stdout);
+
 						/*printf("\n%s\n", state.item.value[0]);*/
 						const char **fields = ((const char**)ua_info + field_offset);
 						for (int i = 1; i < 5; i++) {
 							if (state.item.value[i] && *state.item.value[i]) {
 								/*printf("%s\t=>\t%s\n", state.item.value[i], *fields);*/
 								if (strcmp(state.item.value[i], *fields) == 0) {
+									num_passed++;
 									/*printf("*");*/
 								} else {
-									printf("\n%s\n in: \"%s\" != out: \"%s\"\n", state.item.value[0], state.item.value[i], *fields);
-									assert(0);
-									exit(1);
+									fprintf(stderr, "\n%s\n in: \"%s\" != out: \"%s\"\n", state.item.value[0], state.item.value[i], *fields);
+									num_failed++;
+									/*assert(0);*/
+									/*exit(1);*/
 								}
 							}
 							fields++;
 						}
 					}
-					/*user_agent_info_destroy(ua_info);*/
 				}
 
 				// Clear the current state
@@ -159,9 +171,17 @@ static void run_test_file(
 				}
 			} break;
 
-			default: break;
+			default:
+				/*printf("token type: %d\n", token.type);*/
+				break;
 		}
-	} while (token.type != YAML_STREAM_END_TOKEN);
+	} while (token.type && token.type != YAML_STREAM_END_TOKEN);
+
+	printf("\b%d PASSED\n", num_passed);
+	if (num_failed > 0) {
+		fprintf(stderr, "%d FAILED\n", num_failed);
+		exit(1);
+	}
 
 	yaml_token_delete(&token);
 
