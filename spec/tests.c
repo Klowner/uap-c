@@ -176,7 +176,7 @@ int main(int argc, char** argv) {
 
 
 	struct user_agent_parser *ua_parser = user_agent_parser_create();
-	FILE *fd = fopen("./uap-core/regexes.yaml", "rb");
+	FILE *fd = fopen("../uap-core/regexes.yaml", "rb");
 	if (fd != NULL) {
 		user_agent_parser_read_file(ua_parser, fd);
 		fclose(fd);
@@ -185,9 +185,9 @@ int main(int argc, char** argv) {
 		return -1;
 	}
 
-	run_test_file("uap-core/tests/test_ua.yaml", 0, ua_parser, &get_field_index_for_ua_test);
-	run_test_file("uap-core/tests/test_os.yaml", 4, ua_parser, &get_field_index_for_os_test);
-	run_test_file("uap-core/tests/test_device.yaml", 9, ua_parser, &get_field_index_for_devices_test);
+	run_test_file("../uap-core/tests/test_ua.yaml", 0, ua_parser, &get_field_index_for_ua_test);
+	run_test_file("../uap-core/tests/test_os.yaml", 4, ua_parser, &get_field_index_for_os_test);
+	run_test_file("../uap-core/tests/test_device.yaml", 9, ua_parser, &get_field_index_for_devices_test);
 
 	user_agent_parser_destroy(ua_parser);
 	return 0;

@@ -45,7 +45,7 @@ shared-lib: $(DLIB) $(SRC) $(INCLUDES)
 static-lib: $(SLIB) $(SRC) $(INCLUDES)
 
 .build/regexes.yaml.h:
-	xxd -i uap-core/regexes.yaml > .build/regexes.yaml.h
+	xxd -i ../uap-core/regexes.yaml > .build/regexes.yaml.h
 
 uaparser: $(OBJS) .build/regexes.yaml.h util/uaparser.o
 	$(CC) $(CFLAGS) $(OBJS) util/uaparser.o $(LDFLAGS) -o uaparser

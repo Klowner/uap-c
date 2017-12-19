@@ -12,7 +12,7 @@ int main(int argc, char **argv) {
 	struct user_agent_parser *ua_parser = user_agent_parser_create();
 	struct user_agent_info *ua_info = user_agent_info_create();
 
-	user_agent_parser_read_buffer(ua_parser, uap_core_regexes_yaml, uap_core_regexes_yaml_len);
+	user_agent_parser_read_buffer(ua_parser, ___uap_core_regexes_yaml, ___uap_core_regexes_yaml_len);
 
 	if (user_agent_parser_parse_string(ua_parser, ua_info, argv[1])) {
 
