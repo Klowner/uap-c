@@ -1,5 +1,5 @@
-CC= gcc
-CFLAGS= -W -Wall
+CC ?= gcc
+CFLAGS= -std=c99 -W -Wall
 CFLAGS+= -O3
 #CFLAGS+= -g -fno-omit-frame-pointer-fsanitize=address
 

@@ -1,0 +1,13 @@
+language: c
+addons:
+  apt:
+    packages:
+      - libyaml-dev
+      - libpcre3-dev
+before_install:
+  - git clone --depth 1 https://github.com/ua-parser/uap-core ../uap-core
+compiler:
+  - clang
+  - gcc
+script: make && make test
+
