@@ -126,10 +126,8 @@ static uint32_t _string_hash_pair_prepare(struct string_hash_pair_t *shp, const 
 
 
 struct unique_strings_t * unique_strings_create() {
-	struct unique_strings_t *us = malloc(sizeof(struct unique_strings_t));
-	memset((void*)us, 0, sizeof(struct unique_strings_t));
-	us->buckets = malloc(sizeof(struct unique_string_node *) * UNIQUE_STRING_BUCKETS);
-	memset(us->buckets, 0, sizeof(struct unique_string_node *) * UNIQUE_STRING_BUCKETS);
+	struct unique_strings_t *us = calloc(1, sizeof(struct unique_strings_t));
+	us->buckets = calloc(UNIQUE_STRING_BUCKETS, sizeof(struct unique_string_node *));
 	return us;
 }
 
@@ -185,12 +183,16 @@ static struct unique_string_node *unique_string_node_create(
 		struct buffer_t *buffer)
 {
 	struct unique_string_node *node = malloc(sizeof(struct unique_string_node));
-	node->next = NULL;
-	node->hash = pair->hash;
-	node->buffer_ptr = buffer_alloc(buffer, strlen(pair->str) + 1);
-	char *ptr = _unique_strings_get(&node->buffer_ptr);
-	const size_t length = strlen(pair->str);
-	memcpy(ptr, pair->str, length + 1);
+
+	if (node) {
+		node->next = NULL;
+		node->hash = pair->hash;
+		node->buffer_ptr = buffer_alloc(buffer, strlen(pair->str) + 1);
+		char *ptr = _unique_strings_get(&node->buffer_ptr);
+		const size_t length = strlen(pair->str);
+		memcpy(ptr, pair->str, length + 1);
+	}
+
 	return node;
 }
 

@@ -365,8 +365,7 @@ static void _apply_replacements(
 				}
 
 				// Allocate a new buffer for the output
-				char *out = malloc(out_size);
-				memset(out, '\0', out_size); // @TODO remove
+				char *out = calloc(1, out_size);
 
 				// Now combine matched user agent patterns with replacement patterns.
 				int write_index = 0; // to output.
@@ -448,8 +447,7 @@ static void _apply_defaults(
 		if (!*field) {
 			const int mv_idx = (i + 1) * 2;
 			const size_t len = matches_vector[mv_idx + 1] - matches_vector[mv_idx];
-			char *out = malloc(len + 1);
-			memset(out, 0, len+1);
+			char *out = calloc(1, len + 1);
 			memcpy(out, &ua_string[matches_vector[mv_idx]], len);
 			*field = out;
 		}
@@ -471,8 +469,7 @@ static void _apply_defaults_for_device(
 			// If the field is undefined, use the first matched pattern if available
 			if (!*fields[i]) {
 				const size_t len = matches_vector[2 + 1] - matches_vector[2];
-				*fields[i] = malloc(len + 1);
-				memset((void*)*fields[i], 0, len + 1);
+				*fields[i] = calloc(1, len + 1);
 				memcpy((void*)*fields[i], &ua_string[matches_vector[2]], len);
 			}
 		}
@@ -763,8 +760,7 @@ static void _user_agent_parser_parse_yaml(struct user_agent_parser *ua_parser, y
 					case VALUE:
 						// Ensure we have somewhere to put the parsed data
 						if (state.new_expression_pair == NULL) {
-							state.new_expression_pair = malloc(sizeof(struct ua_expression_pair));
-							memset(state.new_expression_pair, 0, sizeof(struct ua_expression_pair));
+							state.new_expression_pair = calloc(1, sizeof(struct ua_expression_pair));
 						}
 
 						switch (state.key_type) {
@@ -897,8 +893,7 @@ int user_agent_parser_parse_string(struct user_agent_parser *ua_parser, struct u
 
 
 struct user_agent_info * user_agent_info_create() {
-	struct user_agent_info *info = malloc(sizeof(struct user_agent_info));
-	memset(info, 0, sizeof(struct user_agent_info));
+	struct user_agent_info *info = calloc(1, sizeof(struct user_agent_info));
 	return info;
 }
 
