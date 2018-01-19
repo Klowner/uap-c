@@ -271,7 +271,6 @@ static void _apply_replacements(
 		const char *ua_string,
 		struct ua_expression_pair *pair,
 		const int *matches_vector, // SUBSTRING_VEC_COUNT
-		const int num_matches,
 		pcre *replacement_re)
 {
 	struct ua_replacement *repl = pair->replacements;
@@ -489,7 +488,7 @@ inline static void apply_replacements_user_agent(
 		const int num_matches,
 		pcre *replacement_re)
 {
-	_apply_replacements((const char**)&state->user_agent, ua_string, pair, matches_vector, num_matches, replacement_re);
+	_apply_replacements((const char**)&state->user_agent, ua_string, pair, matches_vector, replacement_re);
 	_apply_defaults((const char**)&state->user_agent, ua_string, 4, matches_vector, num_matches);
 }
 
@@ -502,7 +501,7 @@ inline static void apply_replacements_os(
 		const int num_matches,
 		pcre *replacement_re)
 {
-	_apply_replacements((const char**)&state->os, ua_string, pair, matches_vector, num_matches, replacement_re);
+	_apply_replacements((const char**)&state->os, ua_string, pair, matches_vector, replacement_re);
 	_apply_defaults((const char**)&state->os, ua_string, 5, matches_vector, num_matches);
 }
 
@@ -515,7 +514,7 @@ inline static void apply_replacements_device(
 		const int num_matches,
 		pcre *replacement_re)
 {
-	_apply_replacements((const char**)&state->device, ua_string, pair, matches_vector, num_matches, replacement_re);
+	_apply_replacements((const char**)&state->device, ua_string, pair, matches_vector, replacement_re);
 	_apply_defaults_for_device(&state->device, ua_string, matches_vector, num_matches);
 }
 
