@@ -1,7 +1,7 @@
 #include <assert.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <stdint.h>
 #include <yaml.h>
 
 #include "user_agent_parser.h"

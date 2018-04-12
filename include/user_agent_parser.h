@@ -50,7 +50,7 @@ void user_agent_parser_destroy(struct user_agent_parser *uap);
 // The user_agent_info instance can be reused for different user agent strings.
 // Returns the number of matched groups (user agent, os, device)
 int user_agent_parser_parse_string(
-        struct user_agent_parser *uap,
+        const struct user_agent_parser *uap,
         struct user_agent_info *info,
         const char *user_agent_string);
 

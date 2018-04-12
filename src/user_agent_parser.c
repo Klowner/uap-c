@@ -865,7 +865,7 @@ int user_agent_parser_read_buffer(struct user_agent_parser *ua_parser, const uns
 }
 
 
-int user_agent_parser_parse_string(struct user_agent_parser *ua_parser, struct user_agent_info *info, const char* user_agent_string) {
+int user_agent_parser_parse_string(const struct user_agent_parser *ua_parser, struct user_agent_info *info, const char* user_agent_string) {
 	struct ua_parse_state state;
 	memset(&state, 0, sizeof(struct ua_parse_state));
 
