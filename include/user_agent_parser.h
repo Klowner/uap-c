@@ -63,3 +63,14 @@ struct user_agent_info * user_agent_info_create();
 void user_agent_info_destroy(struct user_agent_info *);
 
 
+// If you choose to use your own method for allocating a user_agent_info
+// use these following two functions:
+
+// A user_agent_info only needs to be initialized once and can then be
+// passed to user_agent_parser_parse_string() repeatedly.
+void user_agent_info_init(struct user_agent_info *);
+
+// When finished with a user_agent_info, this function will free any
+// data associated with the instance. It's then your responsibility
+// to free the user_agent_info instance.
+void user_agent_info_cleanup(struct user_agent_info *);

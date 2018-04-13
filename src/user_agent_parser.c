@@ -213,9 +213,6 @@ static void ua_parse_state_create_user_agent_info(
 		struct user_agent_info *info,
 		struct ua_parse_state *state)
 {
-	/*// Wipe the info*/
-	/*memset(info, '\0', sizeof(struct user_agent_info));*/
-
 	// Calculate total buffer requirements for all info strings
 	size_t size = 0;
 	const char **src_field = (const char**)state;
@@ -898,11 +895,21 @@ struct user_agent_info * user_agent_info_create() {
 }
 
 
-void user_agent_info_destroy(struct user_agent_info *info) {
+void user_agent_info_init(struct user_agent_info *info) {
+	memset(info, 0, sizeof(struct user_agent_info));
+}
+
+
+void user_agent_info_cleanup(struct user_agent_info *info) {
 	if (info != NULL) {
 		if (info->strings) {
 			free((void*)info->strings);
 		}
-		free(info);
 	}
+}
+
+
+void user_agent_info_destroy(struct user_agent_info *info) {
+	user_agent_info_cleanup(info);
+	free(info);
 }
