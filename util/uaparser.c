@@ -1,5 +1,5 @@
 #include <stdio.h>
-#include "user_agent_parser.h"
+#include "uap/uap.h"
 #include "regexes.yaml.h"
 
 int main(int argc, char **argv) {
@@ -9,12 +9,12 @@ int main(int argc, char **argv) {
 		return -1;
 	}
 
-	struct user_agent_parser *ua_parser = user_agent_parser_create();
-	struct user_agent_info *ua_info = user_agent_info_create();
+	struct uap_parser *ua_parser = uap_parser_create();
+	struct uap_useragent_info *ua_info = uap_useragent_info_create();
 
-	user_agent_parser_read_buffer(ua_parser, ___uap_core_regexes_yaml, ___uap_core_regexes_yaml_len);
+	uap_parser_read_buffer(ua_parser, ___uap_core_regexes_yaml, ___uap_core_regexes_yaml_len);
 
-	if (user_agent_parser_parse_string(ua_parser, ua_info, argv[1])) {
+	if (uap_parser_parse_string(ua_parser, ua_info, argv[1])) {
 
 		printf("user_agent.family\t%s\n",  ua_info->user_agent.family);
 		printf("user_agent.major\t%s\n",   ua_info->user_agent.major);
@@ -33,8 +33,8 @@ int main(int argc, char **argv) {
 
 	}
 
-	user_agent_parser_destroy(ua_parser);
-	user_agent_info_destroy(ua_info);
+	uap_parser_destroy(ua_parser);
+	uap_useragent_info_destroy(ua_info);
 
 	return 0;
 }

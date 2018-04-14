@@ -3,7 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "unique_strings.h"
+#include "uap/unique_strings.h"
 
 #define UNIQUE_STRING_BUCKETS 32
 #define MURMUR_SEED 0xf9a025a4 // random

@@ -6,8 +6,8 @@
 #include <stdlib.h>
 #include <yaml.h>
 
-#include "user_agent_parser.h"
-#include "unique_strings.h"
+#include "uap/unique_strings.h"
+#include "uap/uap.h"
 
 #define MAX_PATTERN_MATCHES (32)
 #define SUBSTRING_VEC_COUNT (MAX_PATTERN_MATCHES*2)
@@ -101,7 +101,7 @@ struct ua_parser_group {
 };
 
 
-struct user_agent_parser {
+struct uap_parser {
 	struct ua_parser_group user_agent_parser_group;
 	struct ua_parser_group os_parser_group;
 	struct ua_parser_group device_parser_group;
@@ -109,14 +109,6 @@ struct user_agent_parser {
 	struct unique_string_handle_t string_handle_other; // handle -> "Other"
 	pcre *replacement_re;
 };
-
-
-struct ua_expression_pair ** ua_expression_pair_last(struct ua_expression_pair *pair) {
-	while (pair && pair->next) {
-		pair = pair->next;
-	}
-	return &pair->next;
-}
 
 
 static void ua_replacement_destroy(struct ua_replacement *replacement) {
@@ -173,13 +165,12 @@ static int ua_parser_group_exec(
 
 			// Found a matching expression, all done.
 			return 1;
+		}
 
-		} else {
-			switch (pcre_result) {
-				case PCRE_ERROR_NOMATCH: break;
-				default:
-					printf("PCRE Error %d\n", pcre_result);
-			}
+		switch (pcre_result) {
+			case PCRE_ERROR_NOMATCH: break;
+			default:
+				printf("PCRE Error %d\n", pcre_result);
 		}
 
 		pair = pair->next;
@@ -209,8 +200,8 @@ static void ua_parse_state_destroy(struct ua_parse_state *state, struct unique_s
 }
 
 
-static void ua_parse_state_create_user_agent_info(
-		struct user_agent_info *info,
+static void ua_parse_state_create_useragent_info(
+		struct uap_useragent_info *info,
 		struct ua_parse_state *state)
 {
 	// Calculate total buffer requirements for all info strings
@@ -232,7 +223,7 @@ static void ua_parse_state_create_user_agent_info(
 
 	// Wipe the info entirely (overwriting info->strings as well,
 	// but we'll re-attach that near the end)
-	memset(info, '\0', sizeof(struct user_agent_info));
+	memset(info, '\0', sizeof(struct uap_useragent_info));
 
 	// Go back to the first field to begin copying to the buffer
 	{
@@ -405,7 +396,7 @@ static void _apply_replacements(
 				// Trim leading whitespace
 				{
 					int i = 0;
-					while (i < out_size && out[i] == ' ') i++;
+					while (i < out_size && out[i] == ' ') { i++; }
 
 					for (int j = i; j < out_size; j++) {
 						out[j - i] = out[j];
@@ -513,8 +504,8 @@ inline static void apply_replacements_device(
 }
 
 
-struct user_agent_parser *user_agent_parser_create() {
-	struct user_agent_parser *ua_parser = malloc(sizeof(struct user_agent_parser));
+struct uap_parser *uap_parser_create() {
+	struct uap_parser *ua_parser = malloc(sizeof(struct uap_parser));
 
 	ua_parser->user_agent_parser_group.expression_pairs = NULL;
 	ua_parser->os_parser_group.expression_pairs         = NULL;
@@ -537,7 +528,7 @@ struct user_agent_parser *user_agent_parser_create() {
 }
 
 
-void user_agent_parser_destroy(struct user_agent_parser *ua_parser) {
+void uap_parser_destroy(struct uap_parser *ua_parser) {
 	ua_expression_pair_destroy(ua_parser->user_agent_parser_group.expression_pairs);
 	ua_expression_pair_destroy(ua_parser->os_parser_group.expression_pairs);
 	ua_expression_pair_destroy(ua_parser->device_parser_group.expression_pairs);
@@ -547,7 +538,7 @@ void user_agent_parser_destroy(struct user_agent_parser *ua_parser) {
 }
 
 
-static void _user_agent_parser_parse_yaml(struct user_agent_parser *ua_parser, yaml_parser_t *yaml_parser) {
+static void _user_agent_parser_parse_yaml(struct uap_parser *ua_parser, yaml_parser_t *yaml_parser) {
 	// Structure to retain the active parsing state
 	struct {
 		enum {
@@ -615,7 +606,7 @@ static void _user_agent_parser_parse_yaml(struct user_agent_parser *ua_parser, y
 						const char *error;
 						int erroffset;
 
-						int options = 0
+						const int options = 0
 							| PCRE_UTF8
 							| PCRE_EXTRA
 							| (state.regex_flag == 'i' ? PCRE_CASELESS : 0)
@@ -815,7 +806,7 @@ static void _user_agent_parser_parse_yaml(struct user_agent_parser *ua_parser, y
 }
 
 
-static void _user_agent_parser_init(struct user_agent_parser *ua_parser, yaml_parser_t *parser) {
+static void _user_agent_parser_init(struct uap_parser *ua_parser, yaml_parser_t *parser) {
 	// Create unique_strings_t for string deduping/packing of replacement strings
 	ua_parser->strings = unique_strings_create();
 
@@ -833,7 +824,7 @@ static void _user_agent_parser_init(struct user_agent_parser *ua_parser, yaml_pa
 }
 
 
-int user_agent_parser_read_file(struct user_agent_parser *ua_parser, FILE *fd) {
+int uap_parser_read_file(struct uap_parser *ua_parser, FILE *fd) {
 	yaml_parser_t parser;
 
 	// Initialize YAML parser
@@ -848,7 +839,7 @@ int user_agent_parser_read_file(struct user_agent_parser *ua_parser, FILE *fd) {
 }
 
 
-int user_agent_parser_read_buffer(struct user_agent_parser *ua_parser, const unsigned char *buffer, const size_t bufsize) {
+int uap_parser_read_buffer(struct uap_parser *ua_parser, const unsigned char *buffer, const size_t bufsize) {
 	yaml_parser_t parser;
 
 	if (!yaml_parser_initialize(&parser)) {
@@ -862,7 +853,7 @@ int user_agent_parser_read_buffer(struct user_agent_parser *ua_parser, const uns
 }
 
 
-int user_agent_parser_parse_string(const struct user_agent_parser *ua_parser, struct user_agent_info *info, const char* user_agent_string) {
+int uap_parser_parse_string(const struct uap_parser *ua_parser, struct uap_useragent_info *info, const char* user_agent_string) {
 	struct ua_parse_state state;
 	memset(&state, 0, sizeof(struct ua_parse_state));
 
@@ -880,7 +871,7 @@ int user_agent_parser_parse_string(const struct user_agent_parser *ua_parser, st
 	}
 
 	if (matched_groups > 0) {
-		ua_parse_state_create_user_agent_info(info, &state);
+		ua_parse_state_create_useragent_info(info, &state);
 	}
 
 	ua_parse_state_destroy(&state, ua_parser->strings);
@@ -889,18 +880,18 @@ int user_agent_parser_parse_string(const struct user_agent_parser *ua_parser, st
 }
 
 
-struct user_agent_info * user_agent_info_create() {
-	struct user_agent_info *info = calloc(1, sizeof(struct user_agent_info));
+struct uap_useragent_info * uap_useragent_info_create() {
+	struct uap_useragent_info *info = calloc(1, sizeof(struct uap_useragent_info));
 	return info;
 }
 
 
-void user_agent_info_init(struct user_agent_info *info) {
-	memset(info, 0, sizeof(struct user_agent_info));
+void uap_useragent_info_init(struct uap_useragent_info *info) {
+	memset(info, 0, sizeof(struct uap_useragent_info));
 }
 
 
-void user_agent_info_cleanup(struct user_agent_info *info) {
+void uap_useragent_info_cleanup(struct uap_useragent_info *info) {
 	if (info != NULL) {
 		if (info->strings) {
 			free((void*)info->strings);
@@ -909,7 +900,7 @@ void user_agent_info_cleanup(struct user_agent_info *info) {
 }
 
 
-void user_agent_info_destroy(struct user_agent_info *info) {
-	user_agent_info_cleanup(info);
+void uap_useragent_info_destroy(struct uap_useragent_info *info) {
+	uap_useragent_info_cleanup(info);
 	free(info);
 }
