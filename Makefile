@@ -5,8 +5,8 @@ CFLAGS+= -O3
 
 NAME=    uaparser
 MAJVER=  0
-MINVER=  1
-RELVER=  1
+MINVER=  2
+RELVER=  0
 VERSION= $(MAJVER).$(MINVER).$(RELVER)
 
 SLIB= lib$(NAME).a
