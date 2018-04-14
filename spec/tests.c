@@ -1,14 +1,25 @@
+#ifndef UAP_TEST_SHOW_PROGRESS
+#define UAP_TEST_SHOW_PROGRESS 0
+#endif // UAP_TEST_SHOW_PROGRESS
+
+#ifndef UAP_TEST_MULTITHREADED
+#define UAP_TEST_MULTITHREADED 1
+#endif // UAP_TEST_MULTITHREADED
+
+
 #include <assert.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <yaml.h>
 
-#include "user_agent_parser.h"
+#if UAP_TEST_MULTITHREADED
+#include <pthread.h>
+#endif // UAP_TEST_MULTITHREADED
+
+#include "uap/uap.h"
 
 #define MAKE_FOURCC(a,b,c,d) ((a)|((b)<<8)|((c)<<16)|((d)<<24))
-
-#define NUM_KEY_PATTERNS 5
 
 
 static int get_field_index_for_ua_test(const char *str) {
@@ -43,10 +54,11 @@ static int get_field_index_for_devices_test(const char *str) {
 	}
 }
 
-static void run_test_file(
+// Returns number of failures
+static int run_test_file(
 		const char *filepath,
 		const int field_offset,
-		struct user_agent_parser *ua_parser,
+		const struct uap_parser *ua_parser,
 		int (*get_field_idx)(const char*)
 		)
 {
@@ -54,14 +66,16 @@ static void run_test_file(
 
 	if (!yaml_parser_initialize(&yaml_parser)) {
 		puts("failed to initialize yaml");
-		return;
+		return -1;
 	}
 
 	FILE *fd = fopen(filepath, "rb");
 	yaml_parser_set_input_file(&yaml_parser, fd);
 
 	printf("Running test cases: \"%s\" ...  ", filepath);
+#if UAP_TEST_SHOW_PROGRESS
 	const char progress[] = "-\\|/-\\|/";
+#endif // UAP_TEST_SHOW_PROGRESS
 
 	fflush(stdout);
 
@@ -91,7 +105,8 @@ static void run_test_file(
 	yaml_token_t token;
 	memset(&token, 0, sizeof(yaml_token_t));
 
-	struct user_agent_info *ua_info = user_agent_info_create();
+	/*struct user_agent_info *ua_info = user_agent_info_create();*/
+	struct uap_useragent_info *ua_info = uap_useragent_info_create();
 
 	int num_passed = 0;
 	int num_failed = 0;
@@ -139,25 +154,22 @@ static void run_test_file(
 				// See if we have a mostly valid looking record
 				if (state.item.value[0] != NULL) {
 					/*struct user_agent_info *ua_info = user_agent_info_create();*/
-					if (user_agent_parser_parse_string(ua_parser, ua_info, state.item.value[0])) {
+					if (uap_parser_parse_string(ua_parser, ua_info, state.item.value[0])) {
 
+#if UAP_TEST_SHOW_PROGRESS
 						// Little progress doo-dad
 						printf("\b%c", progress[num_passed % strlen(progress)]);
 						fflush(stdout);
+#endif // UAP_TEST_SHOW_PROGRESS
 
-						/*printf("\n%s\n", state.item.value[0]);*/
 						const char **fields = ((const char**)ua_info + field_offset);
 						for (int i = 1; i < 5; i++) {
 							if (state.item.value[i] && *state.item.value[i]) {
-								/*printf("%s\t=>\t%s\n", state.item.value[i], *fields);*/
 								if (strcmp(state.item.value[i], *fields) == 0) {
 									num_passed++;
-									/*printf("*");*/
 								} else {
 									fprintf(stderr, "\n%s\n in: \"%s\" != out: \"%s\"\n", state.item.value[0], state.item.value[i], *fields);
 									num_failed++;
-									/*assert(0);*/
-									/*exit(1);*/
 								}
 							}
 							fields++;
@@ -180,7 +192,7 @@ static void run_test_file(
 	printf("\b%d PASSED\n", num_passed);
 	if (num_failed > 0) {
 		fprintf(stderr, "%d FAILED\n", num_failed);
-		exit(1);
+		/*exit(1);*/
 	}
 
 	yaml_token_delete(&token);
@@ -190,39 +202,86 @@ static void run_test_file(
 		state.item.value[i] = NULL;
 	}
 
-	user_agent_info_destroy(ua_info);
+	uap_useragent_info_destroy(ua_info);
 	yaml_parser_delete(&yaml_parser);
+
+	return num_failed;
 }
+
+
+#if UAP_TEST_MULTITHREADED
+struct thread_param_t {
+	char *path;
+	unsigned int offset;
+	struct uap_parser *parser;
+	int (*get_field_idx)(const char*);
+	int num_failures;
+};
+
+static void *run_test_worker(void *args) {
+	struct thread_param_t* params = (struct thread_param_t*)args;
+	printf("args: %s\n", params->path);
+	const int num_failures = run_test_file(params->path,
+			params->offset, params->parser, params->get_field_idx);
+	params->num_failures = num_failures;
+
+	return NULL;
+}
+#endif // UAP_TEST_MULTITHREADED
 
 
 int main(int argc, char** argv) {
 	(void)argc;
 	(void)argv;
 
-
-	struct user_agent_parser *ua_parser = user_agent_parser_create();
+	struct uap_parser *ua_parser = uap_parser_create();
 	FILE *fd = fopen("../uap-core/regexes.yaml", "rb");
 	if (fd != NULL) {
-		user_agent_parser_read_file(ua_parser, fd);
+		uap_parser_read_file(ua_parser, fd);
 		fclose(fd);
 	} else {
-		user_agent_parser_destroy(ua_parser);
+		uap_parser_destroy(ua_parser);
 		return -1;
 	}
 
+#if UAP_TEST_MULTITHREADED
+	struct thread_param_t thread_params[10];
+	int thread_params_iter = 0;
+	pthread_t thread_ids[10];
+#define RUN_TEST(_path, _offset, _parser, _get_field_idx) \
+	{ \
+		pthread_t *tid = &thread_ids[thread_params_iter]; \
+		struct thread_param_t *params = &thread_params[thread_params_iter++]; \
+		params->path = _path; \
+		params->offset = _offset; \
+		params->parser = _parser; \
+		params->get_field_idx = _get_field_idx; \
+		pthread_create(tid, NULL, run_test_worker, params); \
+	}
+#else
+#define RUN_TEST(_path, _offset, _parser, _get_field_idx) \
+	(run_test_file(_path, _offset, _parser, _get_field_idx));
+#endif // UAP_TEST_MULTITHREADED
+
 	// Base tests
-	run_test_file("../uap-core/tests/test_ua.yaml", 0, ua_parser, &get_field_index_for_ua_test);
-	run_test_file("../uap-core/tests/test_os.yaml", 4, ua_parser, &get_field_index_for_os_test);
-	run_test_file("../uap-core/tests/test_device.yaml", 9, ua_parser, &get_field_index_for_devices_test);
+	RUN_TEST("../uap-core/tests/test_ua.yaml", 0, ua_parser, &get_field_index_for_ua_test);
+	RUN_TEST("../uap-core/tests/test_os.yaml", 4, ua_parser, &get_field_index_for_os_test);
+	RUN_TEST("../uap-core/tests/test_device.yaml", 9, ua_parser, &get_field_index_for_devices_test);
 
 	// Additional tests
-	run_test_file("../uap-core/test_resources/firefox_user_agent_strings.yaml", 0, ua_parser, &get_field_index_for_ua_test);
-	run_test_file("../uap-core/test_resources/opera_mini_user_agent_strings.yaml", 0, ua_parser, &get_field_index_for_ua_test);
-	run_test_file("../uap-core/test_resources/podcasting_user_agent_strings.yaml", 0, ua_parser, &get_field_index_for_ua_test);
-	run_test_file("../uap-core/test_resources/additional_os_tests.yaml", 4, ua_parser, &get_field_index_for_os_test);
-	run_test_file("../uap-core/test_resources/pgts_browser_list.yaml", 0, ua_parser, &get_field_index_for_ua_test);
+	RUN_TEST("../uap-core/test_resources/firefox_user_agent_strings.yaml", 0, ua_parser, &get_field_index_for_ua_test);
+	RUN_TEST("../uap-core/test_resources/opera_mini_user_agent_strings.yaml", 0, ua_parser, &get_field_index_for_ua_test);
+	RUN_TEST("../uap-core/test_resources/podcasting_user_agent_strings.yaml", 0, ua_parser, &get_field_index_for_ua_test);
+	RUN_TEST("../uap-core/test_resources/additional_os_tests.yaml", 4, ua_parser, &get_field_index_for_os_test);
+	RUN_TEST("../uap-core/test_resources/pgts_browser_list.yaml", 0, ua_parser, &get_field_index_for_ua_test);
 	// ^ this thing is 2MB of user agent strings, and so it takes forever to run.
 
-	user_agent_parser_destroy(ua_parser);
+#if UAP_TEST_MULTITHREADED
+	for (int i = 0; i < thread_params_iter; i++) {
+		pthread_join(thread_ids[i], NULL);
+	}
+#endif // UAP_TEST_MULTITHREADED
+
+	uap_parser_destroy(ua_parser);
 	return 0;
 }
