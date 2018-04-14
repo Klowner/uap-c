@@ -4,7 +4,7 @@
 #include <stdlib.h>
 #include <yaml.h>
 
-#include "user_agent_parser.h"
+#include "uap/uap.h"
 
 #define MAKE_FOURCC(a,b,c,d) ((a)|((b)<<8)|((c)<<16)|((d)<<24))
 
@@ -46,7 +46,7 @@ static int get_field_index_for_devices_test(const char *str) {
 static void run_test_file(
 		const char *filepath,
 		const int field_offset,
-		struct user_agent_parser *ua_parser,
+		struct uap_parser *ua_parser,
 		int (*get_field_idx)(const char*)
 		)
 {
@@ -91,7 +91,7 @@ static void run_test_file(
 	yaml_token_t token;
 	memset(&token, 0, sizeof(yaml_token_t));
 
-	struct user_agent_info *ua_info = user_agent_info_create();
+	struct uap_useragent_info *ua_info = uap_useragent_info_create();
 
 	int num_passed = 0;
 	int num_failed = 0;
@@ -138,8 +138,7 @@ static void run_test_file(
 
 				// See if we have a mostly valid looking record
 				if (state.item.value[0] != NULL) {
-					/*struct user_agent_info *ua_info = user_agent_info_create();*/
-					if (user_agent_parser_parse_string(ua_parser, ua_info, state.item.value[0])) {
+					if (uap_parser_parse_string(ua_parser, ua_info, state.item.value[0])) {
 
 						// Little progress doo-dad
 						printf("\b%c", progress[num_passed % strlen(progress)]);
@@ -190,7 +189,7 @@ static void run_test_file(
 		state.item.value[i] = NULL;
 	}
 
-	user_agent_info_destroy(ua_info);
+	uap_useragent_info_destroy(ua_info);
 	yaml_parser_delete(&yaml_parser);
 }
 
@@ -200,13 +199,13 @@ int main(int argc, char** argv) {
 	(void)argv;
 
 
-	struct user_agent_parser *ua_parser = user_agent_parser_create();
+	struct uap_parser *ua_parser = uap_parser_create();
 	FILE *fd = fopen("../uap-core/regexes.yaml", "rb");
 	if (fd != NULL) {
-		user_agent_parser_read_file(ua_parser, fd);
+		uap_parser_read_file(ua_parser, fd);
 		fclose(fd);
 	} else {
-		user_agent_parser_destroy(ua_parser);
+		uap_parser_destroy(ua_parser);
 		return -1;
 	}
 
@@ -223,6 +222,6 @@ int main(int argc, char** argv) {
 	run_test_file("../uap-core/test_resources/pgts_browser_list.yaml", 0, ua_parser, &get_field_index_for_ua_test);
 	// ^ this thing is 2MB of user agent strings, and so it takes forever to run.
 
-	user_agent_parser_destroy(ua_parser);
+	uap_parser_destroy(ua_parser);
 	return 0;
 }
